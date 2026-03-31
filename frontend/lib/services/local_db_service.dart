@@ -16,7 +16,10 @@ class LocalDbService {
     if (!kIsWeb) {
       _db = await _initDb();
     }
-    return _db ?? throw Exception('Web mock');
+    if (_db == null) {
+      throw Exception('Web mock');
+    }
+    return _db!;
   }
 
   Future<Database> _initDb() async {

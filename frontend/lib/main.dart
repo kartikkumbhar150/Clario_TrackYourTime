@@ -1,10 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'screens/dashboard_screen.dart';
+import 'core/app_theme.dart';
 import 'providers/productivity_provider.dart';
+import 'screens/login_screen.dart';
+import 'screens/home_shell.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Set system UI style for white theme
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.dark,
+    systemNavigationBarColor: AppColors.surface,
+    systemNavigationBarIconBrightness: Brightness.dark,
+  ));
+
   runApp(
     MultiProvider(
       providers: [
@@ -22,12 +34,13 @@ class ProductivityApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Discipline',
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        primarySwatch: Colors.deepPurple,
-        scaffoldBackgroundColor: const Color(0xFF121212), // Deep dark mode
-      ),
-      home: const DashboardScreen(),
+      debugShowCheckedModeBanner: false,
+      theme: appTheme(),
+      initialRoute: '/login',
+      routes: {
+        '/login': (context) => const LoginScreen(),
+        '/home': (context) => const HomeShell(),
+      },
     );
   }
 }
