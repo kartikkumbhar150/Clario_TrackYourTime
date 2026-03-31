@@ -6,6 +6,7 @@ export interface IUser extends Document {
   email: string;
   password?: string;
   googleId?: string;
+  profilePhoto?: string;
   categories: string[];
   matchPassword(enteredPassword: string): Promise<boolean>;
 }
@@ -15,6 +16,7 @@ const UserSchema: Schema = new Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String },
   googleId: { type: String },
+  profilePhoto: { type: String, default: '' },
   categories: { 
     type: [String], 
     default: ['Study', 'DSA', 'Work', 'Gym', 'Sleep', 'Social Media', 'Gaming', 'Rest', 'Other'] 

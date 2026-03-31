@@ -62,17 +62,6 @@ class ApiService {
     }
   }
 
-  Future<Map<String, dynamic>> getMe() async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/auth/me'),
-      headers: await _getHeaders(),
-    );
-    if (res.statusCode == 200) {
-      return jsonDecode(res.body);
-    }
-    throw Exception('Failed to fetch profile');
-  }
-
   Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
@@ -83,6 +72,38 @@ class ApiService {
   Future<bool> isLoggedIn() async {
     final token = await _getToken();
     return token != null && token.isNotEmpty;
+  }
+
+  // ─── PROFILE ────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> getProfile() async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/users/profile'),
+      headers: await _getHeaders(),
+    );
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body);
+    }
+    throw Exception('Failed to fetch profile');
+  }
+
+  Future<Map<String, dynamic>> updateProfile({String? name, String? profilePhoto}) async {
+    final body = <String, dynamic>{};
+    if (name != null) body['name'] = name;
+    if (profilePhoto != null) body['profilePhoto'] = profilePhoto;
+
+    final res = await http.put(
+      Uri.parse('$baseUrl/users/profile'),
+      headers: await _getHeaders(),
+      body: jsonEncode(body),
+    );
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_name', data['name']);
+      return data;
+    }
+    throw Exception('Failed to update profile');
   }
 
   // ─── TASKS ──────────────────────────────────────────────
