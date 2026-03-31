@@ -1,9 +1,6 @@
 import { Request, Response } from 'express';
-import { OAuth2Client } from 'google-auth-library';
 import jwt from 'jsonwebtoken';
 import User from '../models/User';
-
-const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const generateToken = (id: string) => {
   return jwt.sign({ id }, process.env.JWT_SECRET || 'secret', {
@@ -11,37 +8,91 @@ const generateToken = (id: string) => {
   });
 };
 
-export const googleSignIn = async (req: Request, res: Response) => {
-  const { idToken } = req.body;
+// @desc    Register a new user with email & password
+// @route   POST /api/auth/register
+export const registerUser = async (req: Request, res: Response) => {
+  const { name, email, password } = req.body;
 
   try {
-    const ticket = await client.verifyIdToken({
-      idToken,
-      audience: process.env.GOOGLE_CLIENT_ID,
-    });
-    const payload = ticket.getPayload();
-
-    if (!payload?.email) {
-      return res.status(400).json({ message: "Google Auth Failed" });
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: 'Please provide name, email, and password' });
     }
 
-    let user = await User.findOne({ email: payload.email });
+    if (password.length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters' });
+    }
 
-    if (!user) {
-      user = await User.create({
-        name: payload.name || 'User',
-        email: payload.email,
-        googleId: payload.sub,
-      });
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: 'User already exists with this email' });
+    }
+
+    const user = await User.create({ name, email, password });
+
+    res.status(201).json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      categories: user.categories,
+      token: generateToken(user._id.toString()),
+    });
+  } catch (error: any) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Login user with email & password
+// @route   POST /api/auth/login
+export const loginUser = async (req: Request, res: Response) => {
+  const { email, password } = req.body;
+
+  try {
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Please provide email and password' });
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user || !user.password) {
+      return res.status(401).json({ message: 'Invalid email or password' });
+    }
+
+    const isMatch = await user.matchPassword(password);
+
+    if (!isMatch) {
+      return res.status(401).json({ message: 'Invalid email or password' });
     }
 
     res.json({
       _id: user._id,
       name: user.name,
       email: user.email,
+      categories: user.categories,
       token: generateToken(user._id.toString()),
     });
   } catch (error: any) {
-    res.status(401).json({ message: 'Invalid Google Token', error: error.message });
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Get current user profile
+// @route   GET /api/auth/me
+export const getMe = async (req: Request, res: Response) => {
+  const user = (req as any).user;
+
+  try {
+    const dbUser = await User.findById(user._id).select('-password');
+    if (!dbUser) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.json({
+      _id: dbUser._id,
+      name: dbUser.name,
+      email: dbUser.email,
+      categories: dbUser.categories,
+    });
+  } catch (error: any) {
+    res.status(500).json({ message: error.message });
   }
 };

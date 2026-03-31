@@ -26,10 +26,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
     return blocks;
   }
 
-  final List<String> _categories = [
-    'Study', 'DSA', 'Work', 'Gym', 'Sleep', 'Social Media', 'Gaming', 'Rest', 'Other'
-  ];
-
   @override
   Widget build(BuildContext context) {
     final blocks = _generateTimeBlocks();
@@ -58,11 +54,15 @@ class _TimelineScreenState extends State<TimelineScreen> {
             const SizedBox(height: 16),
             // Timeline List
             Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                itemCount: blocks.length,
-                itemBuilder: (context, index) {
-                  return _buildTimeBlock(context, blocks[index], index);
+              child: Consumer<ProductivityProvider>(
+                builder: (context, provider, _) {
+                  return ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    itemCount: blocks.length,
+                    itemBuilder: (context, index) {
+                      return _buildTimeBlock(context, blocks[index], index, provider.slots);
+                    },
+                  );
                 },
               ),
             ),
@@ -72,13 +72,54 @@ class _TimelineScreenState extends State<TimelineScreen> {
     );
   }
 
-  Widget _buildTimeBlock(BuildContext context, String timeRange, int index) {
+  Widget _buildTimeBlock(BuildContext context, String timeRange, int index, List<TimeSlot> slots) {
     final now = DateTime.now();
     final hour = int.parse(timeRange.substring(0, 2));
     final minute = int.parse(timeRange.substring(3, 5));
     final isCurrentBlock = now.hour == hour &&
         now.minute >= minute &&
         now.minute < minute + 20;
+
+    // Check if this block has been logged
+    final existingSlot = slots.where((s) => s.timeRange == timeRange).isNotEmpty
+        ? slots.firstWhere((s) => s.timeRange == timeRange)
+        : null;
+
+    // Determine colors and labels based on existing slot
+    Color blockColor;
+    Color textColor;
+    String statusLabel;
+    IconData statusIcon;
+
+    if (existingSlot != null) {
+      switch (existingSlot.type) {
+        case ProductivityType.productive:
+          blockColor = AppColors.primaryGreen.withOpacity(0.08);
+          textColor = AppColors.primaryGreen;
+          statusLabel = '✨ Productive';
+          statusIcon = Icons.check_circle_rounded;
+          break;
+        case ProductivityType.neutral:
+          blockColor = AppColors.softOrange.withOpacity(0.08);
+          textColor = AppColors.softOrange;
+          statusLabel = '⚡ Neutral';
+          statusIcon = Icons.remove_circle_rounded;
+          break;
+        case ProductivityType.wasted:
+          blockColor = AppColors.softPink.withOpacity(0.08);
+          textColor = AppColors.softPink;
+          statusLabel = '💤 Wasted';
+          statusIcon = Icons.cancel_rounded;
+          break;
+      }
+    } else {
+      blockColor = isCurrentBlock
+          ? AppColors.primaryBlue.withOpacity(0.06)
+          : AppColors.surface;
+      textColor = isCurrentBlock ? AppColors.primaryBlue : AppColors.textTertiary;
+      statusLabel = 'Log';
+      statusIcon = Icons.add_rounded;
+    }
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -88,14 +129,14 @@ class _TimelineScreenState extends State<TimelineScreen> {
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
-            color: isCurrentBlock
-                ? AppColors.primaryBlue.withOpacity(0.06)
-                : AppColors.surface,
+            color: blockColor,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: isCurrentBlock
-                  ? AppColors.primaryBlue.withOpacity(0.3)
-                  : AppColors.border.withOpacity(0.5),
+              color: existingSlot != null
+                  ? textColor.withOpacity(0.3)
+                  : isCurrentBlock
+                      ? AppColors.primaryBlue.withOpacity(0.3)
+                      : AppColors.border.withOpacity(0.5),
             ),
             boxShadow: isCurrentBlock ? AppShadows.cardShadow : AppShadows.softShadow,
           ),
@@ -106,9 +147,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 width: 4,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: isCurrentBlock
-                      ? AppColors.primaryBlue
-                      : AppColors.border,
+                  color: existingSlot != null
+                      ? textColor
+                      : isCurrentBlock
+                          ? AppColors.primaryBlue
+                          : AppColors.border,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -119,40 +162,53 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 child: Text(
                   timeRange,
                   style: AppTextStyles.bodyBold.copyWith(
-                    color: isCurrentBlock
-                        ? AppColors.primaryBlue
-                        : AppColors.textPrimary,
+                    color: existingSlot != null
+                        ? textColor
+                        : isCurrentBlock
+                            ? AppColors.primaryBlue
+                            : AppColors.textPrimary,
                     fontSize: 14,
                     fontFamily: 'monospace',
                   ),
                 ),
               ),
+              // Category label for logged slots
+              if (existingSlot != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: textColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    existingSlot.category,
+                    style: AppTextStyles.caption.copyWith(
+                      color: textColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               const Spacer(),
-              // Action
+              // Action / Status
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: isCurrentBlock
-                      ? AppColors.primaryBlue.withOpacity(0.1)
-                      : AppColors.background,
+                  color: existingSlot != null
+                      ? textColor.withOpacity(0.1)
+                      : isCurrentBlock
+                          ? AppColors.primaryBlue.withOpacity(0.1)
+                          : AppColors.background,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
                   children: [
-                    Icon(
-                      Icons.add_rounded,
-                      size: 16,
-                      color: isCurrentBlock
-                          ? AppColors.primaryBlue
-                          : AppColors.textTertiary,
-                    ),
+                    Icon(statusIcon, size: 16, color: textColor),
                     const SizedBox(width: 4),
                     Text(
-                      'Log',
+                      statusLabel,
                       style: AppTextStyles.caption.copyWith(
-                        color: isCurrentBlock
-                            ? AppColors.primaryBlue
-                            : AppColors.textTertiary,
+                        color: textColor,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -167,7 +223,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 
   void _showQuickEntrySheet(BuildContext context, String timeRange) {
-    String selectedCategory = _categories.first;
+    final categories = context.read<ProductivityProvider>().categories;
+    String selectedCategory = categories.isNotEmpty ? categories.first : 'Other';
     ProductivityType selectedType = ProductivityType.productive;
 
     showModalBottomSheet(
@@ -268,7 +325,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: _categories.map((cat) {
+                children: categories.isEmpty 
+                  ? [Text('No categories available, please add some in settings', style: AppTextStyles.caption)] 
+                  : categories.map((cat) {
                   final isSelected = cat == selectedCategory;
                   return GestureDetector(
                     onTap: () => setSheetState(() => selectedCategory = cat),

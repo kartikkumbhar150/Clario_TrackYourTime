@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../core/app_theme.dart';
+import '../providers/productivity_provider.dart';
+import '../services/api_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -9,11 +12,12 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  final TextEditingController _categoryController = TextEditingController();
+  
   bool _darkMode = false;
   bool _notifications = true;
   bool _dailyReminder = true;
   bool _weeklyReport = true;
-  bool _offlineMode = true;
 
   @override
   Widget build(BuildContext context) {
@@ -37,11 +41,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _toggleItem(
                     Icons.dark_mode_rounded, 'Dark Mode', _darkMode, (val) {
                   setState(() => _darkMode = val);
-                }),
-                _divider(),
-                _toggleItem(Icons.wifi_off_rounded, 'Offline Mode', _offlineMode,
-                    (val) {
-                  setState(() => _offlineMode = val);
                 }),
               ]),
               const SizedBox(height: 24),
@@ -69,16 +68,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ]),
               const SizedBox(height: 24),
 
+              // Time Slot Categories Section
+              Text('TIME SLOT CATEGORIES',
+                  style: AppTextStyles.label.copyWith(letterSpacing: 1)),
+              const SizedBox(height: 12),
+              _buildCategoriesSection(context),
+              const SizedBox(height: 24),
+
               // Account Section
               Text('ACCOUNT',
                   style: AppTextStyles.label.copyWith(letterSpacing: 1)),
               const SizedBox(height: 12),
               _settingsCard([
-                _navItem(Icons.person_outline_rounded, 'Edit Profile', () {}),
-                _divider(),
-                _navItem(Icons.key_rounded, 'Change Password', () {}),
-                _divider(),
-                _navItem(Icons.download_rounded, 'Export Data', () {}),
+                _navItem(Icons.logout_rounded, 'Sign Out', () async {
+                  final apiService = ApiService();
+                  await apiService.logout();
+                  if (context.mounted) {
+                    context.read<ProductivityProvider>().clearData();
+                    Navigator.pushNamedAndRemoveUntil(
+                      context, '/login', (route) => false,
+                    );
+                  }
+                }),
               ]),
               const SizedBox(height: 24),
 
@@ -204,6 +215,77 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 color: AppColors.textHint, size: 22),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildCategoriesSection(BuildContext context) {
+    final provider = context.watch<ProductivityProvider>();
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: AppShadows.softShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: provider.categories.map((cat) {
+              return Chip(
+                label: Text(cat, style: AppTextStyles.caption.copyWith(color: AppColors.textSecondary)),
+                backgroundColor: AppColors.primaryBlue.withOpacity(0.1),
+                side: BorderSide.none,
+                deleteIcon: Icon(Icons.close_rounded, size: 16, color: AppColors.softPink),
+                onDeleted: () {
+                  provider.removeCategory(cat);
+                },
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _categoryController,
+                  style: AppTextStyles.caption.copyWith(color: AppColors.textPrimary),
+                  decoration: InputDecoration(
+                    hintText: 'New category...',
+                    hintStyle: AppTextStyles.caption.copyWith(color: AppColors.textHint),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    filled: true,
+                    fillColor: AppColors.background,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () {
+                  if (_categoryController.text.trim().isNotEmpty) {
+                    provider.addCategory(_categoryController.text.trim());
+                    _categoryController.clear();
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryBlue,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.add_rounded, color: Colors.white, size: 20),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

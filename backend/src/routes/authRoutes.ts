@@ -1,8 +1,11 @@
 import express from 'express';
-import { googleSignIn } from '../controllers/authController';
+import { registerUser, loginUser, getMe } from '../controllers/authController';
+import { protect } from '../middleware/authMiddleware';
 
 const router = express.Router();
 
-router.post('/google', googleSignIn);
+router.post('/register', registerUser);
+router.post('/login', loginUser);
+router.get('/me', protect, getMe);
 
 export default router;

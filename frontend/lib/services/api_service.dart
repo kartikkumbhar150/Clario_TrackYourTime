@@ -22,20 +22,70 @@ class ApiService {
     };
   }
 
-  Future<void> loginWithGoogle(String idToken) async {
+  // ─── AUTH ───────────────────────────────────────────────
+
+  Future<Map<String, dynamic>> registerWithEmail(String name, String email, String password) async {
     final res = await http.post(
-      Uri.parse('$baseUrl/auth/google'),
+      Uri.parse('$baseUrl/auth/register'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'idToken': idToken}),
+      body: jsonEncode({'name': name, 'email': email, 'password': password}),
+    );
+    if (res.statusCode == 201) {
+      final data = jsonDecode(res.body);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('auth_token', data['token']);
+      await prefs.setString('user_name', data['name']);
+      await prefs.setString('user_email', data['email']);
+      return data;
+    } else {
+      final error = jsonDecode(res.body);
+      throw Exception(error['message'] ?? 'Registration failed');
+    }
+  }
+
+  Future<Map<String, dynamic>> loginWithEmail(String email, String password) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/auth/login'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'email': email, 'password': password}),
     );
     if (res.statusCode == 200) {
       final data = jsonDecode(res.body);
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('auth_token', data['token']);
+      await prefs.setString('user_name', data['name']);
+      await prefs.setString('user_email', data['email']);
+      return data;
     } else {
-      throw Exception('Failed to sign in via Google');
+      final error = jsonDecode(res.body);
+      throw Exception(error['message'] ?? 'Login failed');
     }
   }
+
+  Future<Map<String, dynamic>> getMe() async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/auth/me'),
+      headers: await _getHeaders(),
+    );
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body);
+    }
+    throw Exception('Failed to fetch profile');
+  }
+
+  Future<void> logout() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('auth_token');
+    await prefs.remove('user_name');
+    await prefs.remove('user_email');
+  }
+
+  Future<bool> isLoggedIn() async {
+    final token = await _getToken();
+    return token != null && token.isNotEmpty;
+  }
+
+  // ─── TASKS ──────────────────────────────────────────────
 
   Future<List<Task>> getTasks(DateTime date) async {
     final res = await http.get(
@@ -60,13 +110,14 @@ class ApiService {
   }
 
   Future<void> completeTask(String id) async {
-    // Note: No edit/delete API mapping, ensuring immutability
     final res = await http.put(
       Uri.parse('$baseUrl/tasks/$id/complete'),
       headers: await _getHeaders(),
     );
     if (res.statusCode != 200) throw Exception('Failed to complete task');
   }
+
+  // ─── TIME SLOTS ─────────────────────────────────────────
 
   Future<List<TimeSlot>> getTimeSlots(DateTime date) async {
     final res = await http.get(
@@ -80,23 +131,51 @@ class ApiService {
     throw Exception('Failed to load slots');
   }
 
-  Future<void> syncSlots(List<TimeSlot> slots) async {
-    // Loops over local slots and sends them to server sequentially or via batching...
-    for (var slot in slots) {
-      await http.post(
-        Uri.parse('$baseUrl/slots'),
-        headers: await _getHeaders(),
-        body: jsonEncode(slot.toJson()),
-      );
+  Future<void> createSlot(TimeSlot slot) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/slots'),
+      headers: await _getHeaders(),
+      body: jsonEncode(slot.toJson()),
+    );
+    if (res.statusCode != 201) {
+      throw Exception('Failed to create time slot');
     }
   }
 
-  Future<Map<String, dynamic>> getAnalytics(String period) async {
+  // ─── CATEGORIES ─────────────────────────────────────────
+
+  Future<List<String>> getCategories() async {
     final res = await http.get(
-      Uri.parse('$baseUrl/analytics/$period'),
+      Uri.parse('$baseUrl/users/categories'),
       headers: await _getHeaders(),
     );
-     if (res.statusCode == 200) {
+    if (res.statusCode == 200) {
+      final List data = jsonDecode(res.body);
+      return data.map((e) => e.toString()).toList();
+    }
+    throw Exception('Failed to load categories');
+  }
+
+  Future<void> updateCategories(List<String> categories) async {
+    final res = await http.put(
+      Uri.parse('$baseUrl/users/categories'),
+      headers: await _getHeaders(),
+      body: jsonEncode({'categories': categories}),
+    );
+    if (res.statusCode != 200) {
+      throw Exception('Failed to update categories');
+    }
+  }
+
+  // ─── ANALYTICS ──────────────────────────────────────────
+
+  Future<Map<String, dynamic>> getAnalytics(String period, {DateTime? date}) async {
+    final queryDate = date ?? DateTime.now();
+    final res = await http.get(
+      Uri.parse('$baseUrl/analytics/$period?date=${queryDate.toIso8601String()}'),
+      headers: await _getHeaders(),
+    );
+    if (res.statusCode == 200) {
       return jsonDecode(res.body);
     }
     throw Exception('Failed to fetch analytics');

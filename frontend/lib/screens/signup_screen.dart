@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core/app_theme.dart';
 import '../widgets/app_widgets.dart';
+import '../services/api_service.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -15,6 +16,7 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
   bool _agreedToTerms = false;
+  bool _isLoading = false;
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
   late Animation<Offset> _slideAnim;
@@ -41,6 +43,53 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _handleSignup() async {
+    final name = _nameController.text.trim();
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+
+    if (name.isEmpty || email.isEmpty || password.isEmpty) {
+      _showError('Please fill in all fields');
+      return;
+    }
+
+    if (password.length < 6) {
+      _showError('Password must be at least 6 characters');
+      return;
+    }
+
+    if (!_agreedToTerms) {
+      _showError('Please agree to the Terms of Service');
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final apiService = ApiService();
+      await apiService.registerWithEmail(name, email, password);
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/home');
+      }
+    } catch (e) {
+      _showError(e.toString().replaceAll('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: AppColors.softPink,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
   }
 
   @override
@@ -87,27 +136,6 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
                   ),
                   const SizedBox(height: 36),
 
-                  // Google Sign Up
-                  _buildSocialButton(
-                    'Sign up with Google',
-                    Icons.g_mobiledata_rounded,
-                    onTap: () {},
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Divider
-                  Row(
-                    children: [
-                      Expanded(child: Divider(color: AppColors.border)),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Text('or sign up with email', style: AppTextStyles.caption),
-                      ),
-                      Expanded(child: Divider(color: AppColors.border)),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-
                   // Full Name
                   Text('Full Name', style: AppTextStyles.label.copyWith(letterSpacing: 0.8)),
                   const SizedBox(height: 8),
@@ -132,7 +160,7 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
                   Text('Password', style: AppTextStyles.label.copyWith(letterSpacing: 0.8)),
                   const SizedBox(height: 8),
                   AppTextField(
-                    hint: 'Min. 8 characters',
+                    hint: 'Min. 6 characters',
                     prefixIcon: Icons.lock_outline_rounded,
                     obscureText: _obscurePassword,
                     controller: _passwordController,
@@ -203,12 +231,12 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
                   const SizedBox(height: 32),
 
                   // Create Account Button
-                  GradientButton(
-                    text: 'Create Account',
-                    onPressed: () {
-                      Navigator.pushReplacementNamed(context, '/home');
-                    },
-                  ),
+                  _isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : GradientButton(
+                          text: 'Create Account',
+                          onPressed: _handleSignup,
+                        ),
                   const SizedBox(height: 28),
 
                   // Login Link
@@ -234,30 +262,6 @@ class _SignupScreenState extends State<SignupScreen> with SingleTickerProviderSt
               ),
             ),
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSocialButton(String text, IconData icon, {required VoidCallback onTap}) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        height: 56,
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border),
-          boxShadow: AppShadows.softShadow,
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 28, color: AppColors.textPrimary),
-            const SizedBox(width: 12),
-            Text(text, style: AppTextStyles.bodyBold),
-          ],
         ),
       ),
     );

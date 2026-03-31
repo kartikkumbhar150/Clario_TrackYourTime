@@ -2,38 +2,41 @@ import 'package:flutter/material.dart';
 import '../models/task.dart';
 import '../models/time_slot.dart';
 import '../services/api_service.dart';
-import '../services/local_db_service.dart';
 
 class ProductivityProvider with ChangeNotifier {
   final ApiService _apiService = ApiService();
-  final LocalDbService _localDbService = LocalDbService();
 
   List<Task> _tasks = [];
   List<TimeSlot> _slots = [];
+  List<String> _categories = [
+    'Study', 'DSA', 'Work', 'Gym', 'Sleep', 'Social Media', 'Gaming', 'Rest', 'Other'
+  ];
   bool _isLoading = false;
+  String? _error;
 
   List<Task> get tasks => _tasks;
   List<TimeSlot> get slots => _slots;
+  List<String> get categories => _categories;
   bool get isLoading => _isLoading;
+  String? get error => _error;
 
   Future<void> loadDailyData(DateTime date) async {
     _isLoading = true;
+    _error = null;
     notifyListeners();
 
     try {
-      // First load from local DB for fast response
-      _tasks = await _localDbService.getPendingLocalTasks();
-      _slots = await _localDbService.getLocalTimeSlots();
+      _tasks = await _apiService.getTasks(date);
+      _slots = await _apiService.getTimeSlots(date);
 
-      // Then attempt real API fetch
-      final apiTasks = await _apiService.getTasks(date);
-      final apiSlots = await _apiService.getTimeSlots(date);
-      
-      _tasks = apiTasks;
-      _slots = apiSlots;
-
+      try {
+        _categories = await _apiService.getCategories();
+      } catch (e) {
+        debugPrint('Using default categories: $e');
+      }
     } catch (e) {
-      print('Network fail, relying on local DB: $e');
+      _error = e.toString();
+      debugPrint('Failed to load data: $e');
     }
 
     _isLoading = false;
@@ -41,18 +44,14 @@ class ProductivityProvider with ChangeNotifier {
   }
 
   Future<void> addTask(String name, DateTime date) async {
-    // Note: No edit or delete method in provider to enforce Immutability
     final newTask = Task(taskName: name, date: date.toIso8601String());
-    
-    // Optimistic UI & Local DB
-    await _localDbService.saveTask(newTask);
-    _tasks.add(newTask);
-    notifyListeners();
 
     try {
-      await _apiService.createTask(newTask);
+      final created = await _apiService.createTask(newTask);
+      _tasks.add(created);
+      notifyListeners();
     } catch (e) {
-      print('Failed to sync to server');
+      debugPrint('Failed to create task: $e');
     }
   }
 
@@ -63,23 +62,63 @@ class ProductivityProvider with ChangeNotifier {
         id: task.id, 
         taskName: task.taskName, 
         date: task.date, 
-        isCompleted: true
+        isCompleted: true,
       );
       notifyListeners();
-      await _apiService.completeTask(task.id!);
-      await _localDbService.saveTask(_tasks[index]);
+
+      try {
+        await _apiService.completeTask(task.id!);
+      } catch (e) {
+        // Rollback
+        _tasks[index] = task;
+        notifyListeners();
+        debugPrint('Failed to complete task: $e');
+      }
     }
   }
 
   Future<void> addTimeSlot(TimeSlot slot) async {
-    _slots.add(slot);
-    notifyListeners();
-    
-    await _localDbService.saveTimeSlot(slot);
     try {
-      await _apiService.syncSlots([slot]);
+      await _apiService.createSlot(slot);
+      _slots.add(slot);
+      notifyListeners();
     } catch (e) {
-      print('Failed to sync slots');
+      debugPrint('Failed to create time slot: $e');
     }
+  }
+
+  Future<void> addCategory(String category) async {
+    if (category.trim().isEmpty) return;
+    if (!_categories.contains(category)) {
+      _categories.add(category);
+      notifyListeners();
+      try {
+        await _apiService.updateCategories(_categories);
+      } catch (e) {
+        _categories.remove(category);
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> removeCategory(String category) async {
+    if (_categories.contains(category)) {
+      final oldCategories = List<String>.from(_categories);
+      _categories.remove(category);
+      notifyListeners();
+      try {
+        await _apiService.updateCategories(_categories);
+      } catch (e) {
+        _categories = oldCategories;
+        notifyListeners();
+      }
+    }
+  }
+
+  void clearData() {
+    _tasks = [];
+    _slots = [];
+    _error = null;
+    notifyListeners();
   }
 }
