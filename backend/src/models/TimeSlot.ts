@@ -28,4 +28,6 @@ const TimeSlotSchema: Schema = new Schema({
   },
 }, { timestamps: true });
 
+TimeSlotSchema.index({ userId: 1, date: 1 });
+
 export default mongoose.model<ITimeSlot>('TimeSlot', TimeSlotSchema);

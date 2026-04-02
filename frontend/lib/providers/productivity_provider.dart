@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/task.dart';
 import '../models/time_slot.dart';
 import '../services/api_service.dart';
+import '../services/offline_sync_service.dart';
 
 class ProductivityProvider with ChangeNotifier {
   final ApiService _apiService = ApiService();
@@ -12,6 +14,7 @@ class ProductivityProvider with ChangeNotifier {
     'Study', 'DSA', 'Work', 'Gym', 'Sleep', 'Social Media', 'Gaming', 'Rest', 'Other'
   ];
   bool _isLoading = false;
+  bool _isBackgroundRefreshing = false;
   String? _error;
 
   // Analytics
@@ -46,6 +49,7 @@ class ProductivityProvider with ChangeNotifier {
   List<TimeSlot> get slots => _slots;
   List<String> get categories => _categories;
   bool get isLoading => _isLoading;
+  bool get isBackgroundRefreshing => _isBackgroundRefreshing;
   String? get error => _error;
   Map<String, dynamic> get categoryBreakdown => _categoryBreakdown;
   Map<String, dynamic> get taskBreakdown => _taskBreakdown;
@@ -68,13 +72,41 @@ class ProductivityProvider with ChangeNotifier {
   bool get heatmapLoaded => _heatmapLoaded;
 
   Future<void> loadDailyData(DateTime date) async {
-    _isLoading = true;
+    // Attempt to load from offline cache first to unblock UI
+    try {
+      final cachedSlotsRaw = await OfflineSyncService.getOfflineDailyData(date, 'slots');
+      if (cachedSlotsRaw != null) {
+        _slots = (cachedSlotsRaw as List).map((e) => TimeSlot.fromJson(e)).toList();
+      }
+      final cachedTasksRaw = await OfflineSyncService.getOfflineDailyData(date, 'tasks');
+      if (cachedTasksRaw != null) {
+        _tasks = (cachedTasksRaw as List).map((e) => Task.fromJson(e)).toList();
+      }
+    } catch (e) {
+      debugPrint('Cache read error: $e');
+    }
+
+    if (_slots.isEmpty && _tasks.isEmpty) {
+      _isLoading = true;
+    } else {
+      _isBackgroundRefreshing = true;
+    }
     _error = null;
     notifyListeners();
 
     try {
+      // Background Sync any outstanding queue
+      final hasConnection = !await _isOffline();
+      if (hasConnection) {
+        await OfflineSyncService.syncOfflineQueue(_apiService);
+      }
+
       _tasks = await _apiService.getTasks(date);
       _slots = await _apiService.getTimeSlots(date);
+      
+      // Update Cache
+      await OfflineSyncService.cacheDailyData(date, 'tasks', _tasks.map((t) => t.toJson()).toList());
+      await OfflineSyncService.cacheDailyData(date, 'slots', _slots.map((s) => s.toJson()).toList());
 
       try {
         _categories = await _apiService.getCategories();
@@ -89,17 +121,13 @@ class ProductivityProvider with ChangeNotifier {
         _productiveMinutes = _parseIntSafe(analytics['productiveMinutes']);
         _wastedMinutes = _parseIntSafe(analytics['wastedMinutes']);
         _neutralMinutes = _parseIntSafe(analytics['neutralMinutes']);
-        _productivityPercentage = double.tryParse(
-            analytics['productivityPercentage']?.toString() ?? '0') ?? 0;
+        _productivityPercentage = double.tryParse(analytics['productivityPercentage']?.toString() ?? '0') ?? 0;
         _productivityIndex = _parseIntSafe(analytics['productivityIndex']);
         _totalTasks = _parseIntSafe(analytics['totalTasks']);
         _completedTasks = _parseIntSafe(analytics['completedTasks']);
-        _categoryBreakdown = Map<String, dynamic>.from(
-            analytics['categoryBreakdown'] ?? {});
-        _taskBreakdown = Map<String, dynamic>.from(
-            analytics['taskBreakdown'] ?? {});
-        _productivityByCategory = Map<String, dynamic>.from(
-            analytics['productivityByCategory'] ?? {});
+        _categoryBreakdown = Map<String, dynamic>.from(analytics['categoryBreakdown'] ?? {});
+        _taskBreakdown = Map<String, dynamic>.from(analytics['taskBreakdown'] ?? {});
+        _productivityByCategory = Map<String, dynamic>.from(analytics['productivityByCategory'] ?? {});
         _aiInsights = analytics['insights']?.toString() ?? '';
       } catch (e) {
         debugPrint('Analytics fetch failed: $e');
@@ -110,7 +138,16 @@ class ProductivityProvider with ChangeNotifier {
     }
 
     _isLoading = false;
+    _isBackgroundRefreshing = false;
     notifyListeners();
+  }
+
+  Future<bool> _isOffline() async {
+    final connectivityResult = await (Connectivity().checkConnectivity());
+    if (connectivityResult is List) {
+      return connectivityResult.contains(ConnectivityResult.none);
+    }
+    return connectivityResult == ConnectivityResult.none;
   }
 
   Future<void> loadWeeklyTrend({DateTime? date}) async {
@@ -177,27 +214,38 @@ class ProductivityProvider with ChangeNotifier {
       notifyListeners();
 
       try {
-        await _apiService.completeTask(task.id!);
+        final isOfflineNow = await _isOffline();
+        if (isOfflineNow) {
+          await OfflineSyncService.queueAction('completeTask', {'taskId': task.id});
+        } else {
+          await _apiService.completeTask(task.id!);
+        }
       } catch (e) {
-        _tasks[index] = task;
-        notifyListeners();
-        debugPrint('Failed to complete task: $e');
+        await OfflineSyncService.queueAction('completeTask', {'taskId': task.id});
+        debugPrint('Queued complete task: $e');
       }
     }
   }
 
   Future<void> addTimeSlot(TimeSlot slot) async {
+    // Optimistic Update
+    _slots.removeWhere((s) => s.timeRange == slot.timeRange);
+    _slots.add(slot);
+    notifyListeners();
+
     try {
-      debugPrint('Creating slot: ${slot.toJson()}');
-      final created = await _apiService.createSlot(slot);
-      debugPrint('Slot created: ${created.id} ${created.timeRange} ${created.type}');
-      _slots.removeWhere((s) => s.timeRange == slot.timeRange);
-      _slots.add(created);
-      notifyListeners();
-      await loadDailyData(DateTime.now());
+      final isOfflineNow = await _isOffline();
+      if (isOfflineNow) {
+        await OfflineSyncService.queueAction('addTimeSlot', slot.toJson());
+      } else {
+        final created = await _apiService.createSlot(slot);
+        final idx = _slots.indexWhere((s) => s.timeRange == slot.timeRange);
+        if (idx >= 0) _slots[idx] = created;
+        notifyListeners();
+      }
     } catch (e) {
-      debugPrint('Failed to create time slot: $e');
-      rethrow;
+      await OfflineSyncService.queueAction('addTimeSlot', slot.toJson());
+      debugPrint('Queued addTimeSlot: $e');
     }
   }
 
@@ -224,12 +272,15 @@ class ProductivityProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      await _apiService.deleteSlot(id);
-      loadDailyData(DateTime.now());
+      final isOfflineNow = await _isOffline();
+      if (isOfflineNow) {
+        await OfflineSyncService.queueAction('deleteTimeSlot', {'id': id});
+      } else {
+        await _apiService.deleteSlot(id);
+      }
     } catch (e) {
-      _slots = oldSlots;
-      notifyListeners();
-      debugPrint('Failed to delete time slot: $e');
+      await OfflineSyncService.queueAction('deleteTimeSlot', {'id': id});
+      debugPrint('Queued delete time slot: $e');
     }
   }
 

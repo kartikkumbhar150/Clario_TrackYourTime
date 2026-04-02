@@ -101,11 +101,24 @@ class _TimelineScreenState extends State<TimelineScreen>
 
                 // Timeline
                 Expanded(
-                  child: provider.isLoading
-                      ? const Center(
-                          child: CircularProgressIndicator(
-                              color: AppColors.primaryBlue))
-                      : _buildTimeline(provider),
+                  child: Stack(
+                    children: [
+                      _buildTimeline(provider),
+                      if (provider.isLoading && provider.slots.isEmpty)
+                        const Center(
+                            child: CircularProgressIndicator(
+                                color: AppColors.primaryBlue)),
+                      if (provider.isBackgroundRefreshing)
+                        const Positioned(
+                          top: 0, left: 0, right: 0,
+                          child: LinearProgressIndicator(
+                            color: AppColors.primaryBlue,
+                            backgroundColor: Colors.transparent,
+                            minHeight: 2,
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
 
                 // Category legend

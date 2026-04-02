@@ -170,6 +170,17 @@ class ApiService {
     throw Exception('Failed to create time slot (${res.statusCode}): $errorBody');
   }
 
+  Future<void> createSlotRaw(Map<String, dynamic> payload) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/slots'),
+      headers: await _getHeaders(),
+      body: jsonEncode(payload),
+    );
+    if (res.statusCode != 201 && res.statusCode != 200) {
+      throw Exception('Failed to create slot raw');
+    }
+  }
+
   Future<TimeSlot> updateSlot(String id, {String? taskSelected, String? category, String? productivityType}) async {
     final body = <String, dynamic>{};
     if (taskSelected != null) body['taskSelected'] = taskSelected;

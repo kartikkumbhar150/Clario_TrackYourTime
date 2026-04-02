@@ -14,4 +14,6 @@ const TaskSchema: Schema = new Schema({
   isCompleted: { type: Boolean, default: false },
 }, { timestamps: true });
 
+TaskSchema.index({ userId: 1, date: 1 });
+
 export default mongoose.model<ITask>('Task', TaskSchema);
