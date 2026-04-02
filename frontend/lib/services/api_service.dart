@@ -229,4 +229,19 @@ class ApiService {
     }
     throw Exception('Failed to fetch analytics');
   }
+
+  // ─── REPORTS ───────────────────────────────────────────
+
+  Future<Map<String, dynamic>> getReport(DateTime startDate, DateTime endDate) async {
+    final res = await http.get(
+      Uri.parse(
+        '$baseUrl/reports?startDate=${startDate.toIso8601String()}&endDate=${endDate.toIso8601String()}',
+      ),
+      headers: await _getHeaders(),
+    );
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body);
+    }
+    throw Exception('Failed to fetch report');
+  }
 }

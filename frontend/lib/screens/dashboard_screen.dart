@@ -4,6 +4,7 @@ import 'package:fl_chart/fl_chart.dart';
 import '../core/app_theme.dart';
 import '../widgets/app_widgets.dart';
 import '../providers/productivity_provider.dart';
+import '../core/time_utils.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -127,7 +128,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                           Expanded(
                             child: StatCard(
                               title: 'Productive',
-                              value: '${(productiveSlots * 20)}m',
+                              value: formatTime(productiveSlots * 20),
                               subtitle:
                                   '${prodPercent.toStringAsFixed(0)}% of time',
                               icon: Icons.trending_up_rounded,
@@ -138,7 +139,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                           Expanded(
                             child: StatCard(
                               title: 'Wasted',
-                              value: '${(wastedSlots * 20)}m',
+                              value: formatTime(wastedSlots * 20),
                               icon: Icons.trending_down_rounded,
                               color: AppColors.softPink,
                             ),
@@ -158,7 +159,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                           Expanded(
                             child: StatCard(
                               title: 'Neutral',
-                              value: '${(neutralSlots * 20)}m',
+                              value: formatTime(neutralSlots * 20),
                               icon: Icons.remove_circle_outline_rounded,
                               color: AppColors.softOrange,
                             ),
@@ -230,7 +231,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                                             value: productiveSlots
                                                 .toDouble(),
                                             title:
-                                                '${(productiveSlots * 20)}m',
+                                                formatTime(productiveSlots * 20),
                                             titleStyle: const TextStyle(
                                                 fontSize: 11,
                                                 fontWeight: FontWeight.w600,
@@ -242,7 +243,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                                             value:
                                                 neutralSlots.toDouble(),
                                             title:
-                                                '${(neutralSlots * 20)}m',
+                                                formatTime(neutralSlots * 20),
                                             titleStyle: const TextStyle(
                                                 fontSize: 11,
                                                 fontWeight: FontWeight.w600,
@@ -254,7 +255,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                                             value:
                                                 wastedSlots.toDouble(),
                                             title:
-                                                '${(wastedSlots * 20)}m',
+                                                formatTime(wastedSlots * 20),
                                             titleStyle: const TextStyle(
                                                 fontSize: 11,
                                                 fontWeight: FontWeight.w600,
@@ -707,7 +708,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
-                      '${minutes.toInt()}m',
+                      formatTime(minutes),
                       style: AppTextStyles.caption.copyWith(
                         color: color,
                         fontWeight: FontWeight.w700,
@@ -786,7 +787,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
-                      '${minutes.toInt()}m',
+                      formatTime(minutes),
                       style: AppTextStyles.caption.copyWith(
                         color: color,
                         fontWeight: FontWeight.w700,
@@ -850,7 +851,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     ),
                   ),
                   Text(
-                    '${totalCat.toInt()}m total',
+                    '${totalCat.toInt() >= 60 ? formatTime(totalCat) : '${totalCat.toInt()}m'} total',
                     style: AppTextStyles.caption.copyWith(
                       fontSize: 11,
                     ),
@@ -891,19 +892,19 @@ class _DashboardScreenState extends State<DashboardScreen>
                 children: [
                   if (productive > 0)
                     Text(
-                      '${productive.toInt()}m ✨  ',
+                      '${formatTime(productive)} ✨  ',
                       style: AppTextStyles.caption.copyWith(
                           color: AppColors.primaryGreen, fontSize: 10),
                     ),
                   if (neutral > 0)
                     Text(
-                      '${neutral.toInt()}m ⚡  ',
+                      '${formatTime(neutral)} ⚡  ',
                       style: AppTextStyles.caption.copyWith(
                           color: AppColors.softOrange, fontSize: 10),
                     ),
                   if (wasted > 0)
                     Text(
-                      '${wasted.toInt()}m 💤  ',
+                      '${formatTime(wasted)} 💤  ',
                       style: AppTextStyles.caption.copyWith(
                           color: AppColors.softPink, fontSize: 10),
                     ),

@@ -8,6 +8,7 @@ import '../core/app_theme.dart';
 import '../models/time_slot.dart';
 import '../services/api_service.dart';
 import '../providers/productivity_provider.dart';
+import 'report_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -248,8 +249,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const SizedBox(height: 28),
 
                     // Menu Items
-                    _menuItem(Icons.bar_chart_rounded, 'Weekly Report',
-                        AppColors.primaryBlue, () {}),
+                    _menuItem(Icons.bar_chart_rounded, 'Productivity Report',
+                        AppColors.primaryBlue, () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const ReportScreen(),
+                        ),
+                      );
+                    }),
                     const SizedBox(height: 10),
                     _menuItem(Icons.category_rounded, 'Manage Categories',
                         AppColors.primaryPurple, () {}),
