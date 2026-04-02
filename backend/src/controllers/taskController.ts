@@ -28,9 +28,10 @@ export const getTasks = async (req: Request, res: Response) => {
 
   try {
     const queryDate = new Date(date as string);
-    // Simple filter to get tasks created/scheduled for the same day
-    const startOfDay = new Date(queryDate.setHours(0,0,0,0));
-    const endOfDay = new Date(queryDate.setHours(23,59,59,999));
+    const startOfDay = new Date(queryDate);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(queryDate);
+    endOfDay.setHours(23, 59, 59, 999);
 
     const tasks = await Task.find({
       userId: user._id,
@@ -59,4 +60,22 @@ export const markTaskCompleted = async (req: Request, res: Response) => {
   } catch(error: any) {
     res.status(400).json({ message: error.message });
   }
+};
+
+// @desc    RESTRICTED — Tasks are immutable
+// @route   PUT /api/tasks/:id
+export const updateTask = async (_req: Request, res: Response) => {
+  return res.status(403).json({
+    message: 'Tasks are immutable. Once created, they cannot be edited.',
+    code: 'IMMUTABLE_TASK'
+  });
+};
+
+// @desc    RESTRICTED — Tasks are immutable
+// @route   DELETE /api/tasks/:id
+export const deleteTask = async (_req: Request, res: Response) => {
+  return res.status(403).json({
+    message: 'Tasks are immutable. Once created, they cannot be deleted.',
+    code: 'IMMUTABLE_TASK'
+  });
 };

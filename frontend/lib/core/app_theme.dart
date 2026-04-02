@@ -12,6 +12,10 @@ class AppColors {
   static const Color primaryGreen = Color(0xFF6BCFA1);
   static const Color softPink = Color(0xFFEF8FA3);
   static const Color softOrange = Color(0xFFEFAB6B);
+  static const Color softTeal = Color(0xFF5CC2E0);
+  static const Color softLavender = Color(0xFFB39DDB);
+  static const Color softYellow = Color(0xFFF0D76B);
+  static const Color softCoral = Color(0xFFFF8A80);
   
   // Text colors
   static const Color textPrimary = Color(0xFF1A1D26);
@@ -46,12 +50,60 @@ class AppColors {
     end: Alignment.bottomRight,
     colors: [Color(0xFFEFAB6B), Color(0xFFEF8FA3)],
   );
+
+  // Category color map — deterministic pastel colors per category
+  static const List<Color> categoryPalette = [
+    Color(0xFF6C8EEF), // Blue
+    Color(0xFF6BCFA1), // Green
+    Color(0xFF9B8FEF), // Purple
+    Color(0xFFEFAB6B), // Orange
+    Color(0xFFEF8FA3), // Pink
+    Color(0xFF5CC2E0), // Teal
+    Color(0xFFE88FEF), // Magenta
+    Color(0xFFA3D977), // Lime
+    Color(0xFFF0D76B), // Yellow
+    Color(0xFFFF8A80), // Coral
+    Color(0xFF80CBC4), // Mint
+    Color(0xFFB39DDB), // Lavender
+  ];
+
+  static Color categoryColor(String category, [int? index]) {
+    if (index != null) return categoryPalette[index % categoryPalette.length];
+    final hash = category.hashCode.abs();
+    return categoryPalette[hash % categoryPalette.length];
+  }
+
+  // Productivity Index color (0-100)
+  static Color productivityIndexColor(double value) {
+    if (value >= 75) return const Color(0xFF4CAF50);
+    if (value >= 50) return const Color(0xFF8BC34A);
+    if (value >= 30) return const Color(0xFFFFC107);
+    return const Color(0xFFFF5252);
+  }
+
+  // Heatmap intensity colors (lightest to darkest)
+  static const List<Color> heatmapColors = [
+    Color(0xFFEBEDF0),
+    Color(0xFFC6E48B),
+    Color(0xFF7BC96F),
+    Color(0xFF239A3B),
+    Color(0xFF196127),
+  ];
+
+  static Color heatmapColor(int minutes, int maxMinutes) {
+    if (minutes == 0) return heatmapColors[0];
+    final ratio = minutes / maxMinutes;
+    if (ratio <= 0.25) return heatmapColors[1];
+    if (ratio <= 0.50) return heatmapColors[2];
+    if (ratio <= 0.75) return heatmapColors[3];
+    return heatmapColors[4];
+  }
 }
 
 class AppShadows {
   static final List<BoxShadow> cardShadow = [
     BoxShadow(
-      color: const Color(0xFF6C8EEF).withOpacity(0.08),
+      color: const Color(0xFF6C8EEF).withValues(alpha: 0.08),
       blurRadius: 24,
       offset: const Offset(0, 8),
     ),
@@ -59,7 +111,7 @@ class AppShadows {
 
   static final List<BoxShadow> softShadow = [
     BoxShadow(
-      color: Colors.black.withOpacity(0.04),
+      color: Colors.black.withValues(alpha: 0.04),
       blurRadius: 16,
       offset: const Offset(0, 4),
     ),
@@ -67,7 +119,7 @@ class AppShadows {
 
   static final List<BoxShadow> buttonShadow = [
     BoxShadow(
-      color: const Color(0xFF6C8EEF).withOpacity(0.3),
+      color: const Color(0xFF6C8EEF).withValues(alpha: 0.3),
       blurRadius: 20,
       offset: const Offset(0, 8),
     ),
@@ -136,6 +188,14 @@ class AppTextStyles {
     fontWeight: FontWeight.w600,
     color: AppColors.white,
     letterSpacing: 0.3,
+  );
+
+  static const TextStyle metric = TextStyle(
+    fontFamily: fontFamily,
+    fontSize: 32,
+    fontWeight: FontWeight.w800,
+    color: AppColors.textPrimary,
+    letterSpacing: -1.0,
   );
 }
 

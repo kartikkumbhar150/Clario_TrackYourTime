@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../core/app_theme.dart';
-import '../widgets/app_widgets.dart';
-import '../providers/productivity_provider.dart';
 import '../core/time_utils.dart';
+import '../providers/productivity_provider.dart';
+import '../widgets/app_widgets.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -30,8 +30,12 @@ class _DashboardScreenState extends State<DashboardScreen>
         CurvedAnimation(parent: _animController, curve: Curves.easeOut);
     _animController.forward();
 
-    Future.microtask(
-        () => context.read<ProductivityProvider>().loadDailyData(DateTime.now()));
+    Future.microtask(() {
+      final provider = context.read<ProductivityProvider>();
+      provider.loadDailyData(DateTime.now());
+      provider.loadWeeklyTrend();
+      provider.loadAIInsights();
+    });
   }
 
   @override
@@ -41,974 +45,859 @@ class _DashboardScreenState extends State<DashboardScreen>
     super.dispose();
   }
 
-  static const List<Color> _categoryColors = [
-    Color(0xFF6C8EEF),
-    Color(0xFF6BCFA1),
-    Color(0xFF9B8FEF),
-    Color(0xFFEFAB6B),
-    Color(0xFFEF8FA3),
-    Color(0xFF5CC2E0),
-    Color(0xFFE88FEF),
-    Color(0xFFA3D977),
-    Color(0xFFEFD36B),
-  ];
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: FadeTransition(
-          opacity: _fadeAnim,
-          child: Consumer<ProductivityProvider>(
-            builder: (context, provider, _) {
-              final totalSlots = provider.slots.length;
-              final productiveSlots = provider.slots
-                  .where((s) => s.type.toString().endsWith('productive'))
-                  .length;
-              final wastedSlots = provider.slots
-                  .where((s) => s.type.toString().endsWith('wasted'))
-                  .length;
-              final neutralSlots =
-                  totalSlots - productiveSlots - wastedSlots;
-              final prodPercent = totalSlots > 0
-                  ? (productiveSlots / totalSlots) * 100
-                  : 0.0;
+        child: Consumer<ProductivityProvider>(
+          builder: (context, provider, _) {
+            if (provider.isLoading && provider.totalMinutes == 0) {
+              return const Center(
+                child: CircularProgressIndicator(color: AppColors.primaryBlue));
+            }
 
-              return CustomScrollView(
-                slivers: [
-                  // Header
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Good ${_getGreeting()}',
-                                style: AppTextStyles.caption
-                                    .copyWith(fontSize: 14),
-                              ),
-                              const SizedBox(height: 4),
-                              Text('Dashboard', style: AppTextStyles.h1),
-                            ],
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 8),
-                            decoration: BoxDecoration(
-                              gradient: AppColors.primaryGradient,
-                              borderRadius: BorderRadius.circular(12),
-                              boxShadow: AppShadows.buttonShadow,
-                            ),
-                            child: Text(
-                              _formattedDate(),
-                              style: AppTextStyles.caption.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+            return FadeTransition(
+              opacity: _fadeAnim,
+              child: RefreshIndicator(
+                color: AppColors.primaryBlue,
+                onRefresh: () async {
+                  await provider.loadDailyData(DateTime.now());
+                  await provider.loadWeeklyTrend();
+                },
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
+                  children: [
+                    // Header
+                    _buildHeader(),
+                    const SizedBox(height: 20),
+
+                    // Productivity Index + Quick Stats
+                    _buildProductivitySection(provider),
+                    const SizedBox(height: 16),
+
+                    // Quick Stats Row
+                    _buildQuickStats(provider),
+                    const SizedBox(height: 20),
+
+                    // Task Checklist
+                    _buildTaskChecklist(provider),
+                    const SizedBox(height: 16),
+
+                    // Donut Chart — Category Time
+                    CollapsibleCard(
+                      title: 'Time by Category',
+                      icon: Icons.donut_large_rounded,
+                      iconColor: AppColors.primaryPurple,
+                      child: _buildDonutChart(provider),
                     ),
-                  ),
+                    const SizedBox(height: 16),
 
-                  const SliverToBoxAdapter(child: SizedBox(height: 24)),
-
-                  // Stats Grid
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: StatCard(
-                              title: 'Productive',
-                              value: formatTime(productiveSlots * 20),
-                              subtitle:
-                                  '${prodPercent.toStringAsFixed(0)}% of time',
-                              icon: Icons.trending_up_rounded,
-                              color: AppColors.primaryGreen,
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: StatCard(
-                              title: 'Wasted',
-                              value: formatTime(wastedSlots * 20),
-                              icon: Icons.trending_down_rounded,
-                              color: AppColors.softPink,
-                            ),
-                          ),
-                        ],
-                      ),
+                    // Pie Chart — Productive vs Unproductive
+                    CollapsibleCard(
+                      title: 'Productivity Split',
+                      icon: Icons.pie_chart_rounded,
+                      iconColor: AppColors.primaryGreen,
+                      child: _buildProductivityPie(provider),
                     ),
-                  ),
+                    const SizedBox(height: 16),
 
-                  const SliverToBoxAdapter(child: SizedBox(height: 14)),
-
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: StatCard(
-                              title: 'Neutral',
-                              value: formatTime(neutralSlots * 20),
-                              icon: Icons.remove_circle_outline_rounded,
-                              color: AppColors.softOrange,
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: StatCard(
-                              title: 'Tasks',
-                              value: '${provider.tasks.length}',
-                              subtitle:
-                                  '${provider.tasks.where((t) => t.isCompleted).length} done',
-                              icon: Icons.check_circle_outline_rounded,
-                              color: AppColors.primaryPurple,
-                            ),
-                          ),
-                        ],
+                    // Bar Chart — Tasks Completed vs Missed
+                    if (provider.weeklyTrendLoaded)
+                      CollapsibleCard(
+                        title: 'Tasks Overview',
+                        icon: Icons.bar_chart_rounded,
+                        iconColor: AppColors.softOrange,
+                        child: _buildTasksBarChart(provider),
                       ),
-                    ),
-                  ),
+                    if (provider.weeklyTrendLoaded) const SizedBox(height: 16),
 
-                  const SliverToBoxAdapter(child: SizedBox(height: 28)),
-
-                  // ─── PIE CHART: Productivity Breakdown ────────
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: AppCard(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text("Today's Focus",
-                                    style: AppTextStyles.h3),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.primaryGreen
-                                        .withOpacity(0.12),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    '${prodPercent.toStringAsFixed(0)}%',
-                                    style: AppTextStyles.bodyBold.copyWith(
-                                      color: AppColors.primaryGreen,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 20),
-                            SizedBox(
-                              height: 180,
-                              child: totalSlots == 0
-                                  ? _emptyChartPlaceholder(
-                                      Icons.pie_chart_outline_rounded,
-                                      'No data yet',
-                                      'Start tracking your time blocks')
-                                  : PieChart(
-                                      PieChartData(
-                                        sectionsSpace: 3,
-                                        centerSpaceRadius: 45,
-                                        sections: [
-                                          PieChartSectionData(
-                                            color: AppColors.primaryGreen,
-                                            value: productiveSlots
-                                                .toDouble(),
-                                            title:
-                                                formatTime(productiveSlots * 20),
-                                            titleStyle: const TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.w600,
-                                                color: Colors.white),
-                                            radius: 30,
-                                          ),
-                                          PieChartSectionData(
-                                            color: AppColors.softOrange,
-                                            value:
-                                                neutralSlots.toDouble(),
-                                            title:
-                                                formatTime(neutralSlots * 20),
-                                            titleStyle: const TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.w600,
-                                                color: Colors.white),
-                                            radius: 26,
-                                          ),
-                                          PieChartSectionData(
-                                            color: AppColors.softPink,
-                                            value:
-                                                wastedSlots.toDouble(),
-                                            title:
-                                                formatTime(wastedSlots * 20),
-                                            titleStyle: const TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.w600,
-                                                color: Colors.white),
-                                            radius: 26,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                            ),
-                            const SizedBox(height: 16),
-                            Row(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.spaceAround,
-                              children: [
-                                _legendItem(
-                                    'Productive', AppColors.primaryGreen),
-                                _legendItem(
-                                    'Neutral', AppColors.softOrange),
-                                _legendItem('Wasted', AppColors.softPink),
-                              ],
-                            ),
-                          ],
-                        ),
+                    // Line Chart — Productivity Trend
+                    if (provider.weeklyTrendLoaded)
+                      CollapsibleCard(
+                        title: 'Weekly Trend',
+                        icon: Icons.show_chart_rounded,
+                        iconColor: AppColors.primaryBlue,
+                        child: _buildProductivityLineChart(provider),
                       ),
-                    ),
-                  ),
+                    if (provider.weeklyTrendLoaded) const SizedBox(height: 16),
 
-                  const SliverToBoxAdapter(child: SizedBox(height: 20)),
-
-                  // ─── BAR CHART: Time by Category ──────────────
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: AppCard(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.primaryBlue
-                                        .withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: const Icon(
-                                      Icons.bar_chart_rounded,
-                                      color: AppColors.primaryBlue,
-                                      size: 18),
-                                ),
-                                const SizedBox(width: 12),
-                                Text('Time by Category',
-                                    style: AppTextStyles.h3),
-                              ],
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'Minutes spent per category today',
-                              style: AppTextStyles.caption
-                                  .copyWith(fontSize: 12),
-                            ),
-                            const SizedBox(height: 20),
-                            _buildCategoryBars(provider.categoryBreakdown),
-                          ],
-                        ),
+                    // Area Chart — Cumulative Focus
+                    if (provider.weeklyTrendLoaded &&
+                        provider.cumulativeFocus.isNotEmpty)
+                      CollapsibleCard(
+                        title: 'Cumulative Focus',
+                        icon: Icons.stacked_line_chart_rounded,
+                        iconColor: AppColors.softTeal,
+                        child: _buildCumulativeAreaChart(provider),
                       ),
-                    ),
-                  ),
+                    if (provider.weeklyTrendLoaded) const SizedBox(height: 16),
 
-                  const SliverToBoxAdapter(child: SizedBox(height: 20)),
-
-                  // ─── BAR CHART: Time per Task ─────────────────
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: AppCard(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.primaryPurple
-                                        .withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: const Icon(
-                                      Icons.stacked_bar_chart_rounded,
-                                      color: AppColors.primaryPurple,
-                                      size: 18),
-                                ),
-                                const SizedBox(width: 12),
-                                Text('Time per Task',
-                                    style: AppTextStyles.h3),
-                              ],
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'How much time spent on each task',
-                              style: AppTextStyles.caption
-                                  .copyWith(fontSize: 12),
-                            ),
-                            const SizedBox(height: 20),
-                            _buildTaskBars(provider.taskBreakdown),
-                          ],
-                        ),
+                    // Scatter Plot — Time vs Completion
+                    if (provider.categoryBreakdown.isNotEmpty)
+                      CollapsibleCard(
+                        title: 'Time vs Productivity',
+                        icon: Icons.scatter_plot_rounded,
+                        iconColor: AppColors.softLavender,
+                        child: _buildScatterPlot(provider),
                       ),
-                    ),
-                  ),
+                    if (provider.categoryBreakdown.isNotEmpty)
+                      const SizedBox(height: 16),
 
-                  const SliverToBoxAdapter(child: SizedBox(height: 20)),
-
-                  // ─── STACKED CHART: Productivity per Category ─
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: AppCard(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.primaryGreen
-                                        .withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: const Icon(
-                                      Icons.analytics_rounded,
-                                      color: AppColors.primaryGreen,
-                                      size: 18),
-                                ),
-                                const SizedBox(width: 12),
-                                Text('Productivity by Category',
-                                    style: AppTextStyles.h3),
-                              ],
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'Productive / Neutral / Wasted per category',
-                              style: AppTextStyles.caption
-                                  .copyWith(fontSize: 12),
-                            ),
-                            const SizedBox(height: 20),
-                            _buildProductivityByCategoryChart(
-                                provider.productivityByCategory),
-                            const SizedBox(height: 12),
-                            Row(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.spaceAround,
-                              children: [
-                                _legendItem(
-                                    'Productive', AppColors.primaryGreen),
-                                _legendItem(
-                                    'Neutral', AppColors.softOrange),
-                                _legendItem(
-                                    'Wasted', AppColors.softPink),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  const SliverToBoxAdapter(child: SizedBox(height: 20)),
-
-                  // ─── AI INSIGHTS CARD ─────────────────────────
-                  if (provider.aiInsights.isNotEmpty &&
-                      !provider.aiInsights.contains('GROQ_API_KEY'))
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 24),
-                        child: Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            gradient: AppColors.primaryGradient,
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: AppShadows.buttonShadow,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color:
-                                          Colors.white.withOpacity(0.2),
-                                      borderRadius:
-                                          BorderRadius.circular(10),
-                                    ),
-                                    child: const Icon(
-                                      Icons.psychology_rounded,
-                                      color: Colors.white,
-                                      size: 20,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Text(
-                                    'AI Coach',
-                                    style: AppTextStyles.h3
-                                        .copyWith(color: Colors.white),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 14),
-                              Text(
-                                provider.aiInsights,
-                                style: AppTextStyles.body.copyWith(
-                                  color:
-                                      Colors.white.withOpacity(0.9),
-                                  height: 1.5,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-
-                  const SliverToBoxAdapter(child: SizedBox(height: 28)),
-
-                  // Tasks Section
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text("Today's Tasks",
-                              style: AppTextStyles.h3),
-                          GestureDetector(
-                            onTap: () => _showAddTaskSheet(context),
-                            child: Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                gradient: AppColors.primaryGradient,
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: const Icon(Icons.add_rounded,
-                                  color: Colors.white, size: 20),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  const SliverToBoxAdapter(child: SizedBox(height: 14)),
-
-                  provider.tasks.isEmpty
-                      ? SliverToBoxAdapter(
-                          child: Padding(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 24),
-                            child: AppCard(
-                              child: Center(
-                                child: Column(
-                                  children: [
-                                    Icon(Icons.checklist_rounded,
-                                        size: 40,
-                                        color: AppColors.textHint),
-                                    const SizedBox(height: 12),
-                                    Text('No tasks yet',
-                                        style: AppTextStyles.bodyBold),
-                                    const SizedBox(height: 4),
-                                    Text('Tap + to add your first task',
-                                        style: AppTextStyles.caption),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        )
-                      : SliverList(
-                          delegate: SliverChildBuilderDelegate(
-                            (context, index) {
-                              final task = provider.tasks[index];
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 24, vertical: 4),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 16, vertical: 14),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.surface,
-                                    borderRadius:
-                                        BorderRadius.circular(14),
-                                    boxShadow: AppShadows.softShadow,
-                                    border: Border.all(
-                                      color: task.isCompleted
-                                          ? AppColors.primaryGreen
-                                              .withOpacity(0.3)
-                                          : AppColors.border,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      GestureDetector(
-                                        onTap: () {
-                                          if (!task.isCompleted) {
-                                            provider
-                                                .completeTask(task);
-                                          }
-                                        },
-                                        child: AnimatedContainer(
-                                          duration: const Duration(
-                                              milliseconds: 200),
-                                          width: 26,
-                                          height: 26,
-                                          decoration: BoxDecoration(
-                                            gradient: task.isCompleted
-                                                ? AppColors
-                                                    .greenGradient
-                                                : null,
-                                            color: task.isCompleted
-                                                ? null
-                                                : Colors.transparent,
-                                            borderRadius:
-                                                BorderRadius.circular(
-                                                    8),
-                                            border: task.isCompleted
-                                                ? null
-                                                : Border.all(
-                                                    color: AppColors
-                                                        .border,
-                                                    width: 1.5),
-                                          ),
-                                          child: task.isCompleted
-                                              ? const Icon(Icons.check,
-                                                  size: 16,
-                                                  color: Colors.white)
-                                              : null,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 14),
-                                      Expanded(
-                                        child: Text(
-                                          task.taskName,
-                                          style: AppTextStyles.bodyBold
-                                              .copyWith(
-                                            decoration: task.isCompleted
-                                                ? TextDecoration
-                                                    .lineThrough
-                                                : null,
-                                            color: task.isCompleted
-                                                ? AppColors
-                                                    .textTertiary
-                                                : AppColors
-                                                    .textPrimary,
-                                          ),
-                                        ),
-                                      ),
-                                      Icon(
-                                          Icons
-                                              .lock_outline_rounded,
-                                          size: 16,
-                                          color: AppColors.textHint),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                            childCount: provider.tasks.length,
-                          ),
-                        ),
-
-                  const SliverToBoxAdapter(child: SizedBox(height: 100)),
-                ],
-              );
-            },
-          ),
+                    // AI Insights
+                    if (provider.aiInsightsLoaded)
+                      _buildAIInsightsCard(provider),
+                  ],
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
   }
 
-  // ─── Chart Builders ────────────────────────────────────
+  Widget _buildHeader() {
+    final now = DateTime.now();
+    final greeting = now.hour < 12
+        ? 'Good Morning'
+        : now.hour < 17
+            ? 'Good Afternoon'
+            : 'Good Evening';
 
-  Widget _emptyChartPlaceholder(
-      IconData icon, String title, String subtitle) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(greeting,
+                  style: AppTextStyles.caption.copyWith(fontSize: 14)),
+              const SizedBox(height: 4),
+              Text('Dashboard', style: AppTextStyles.h1),
+            ],
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: AppShadows.softShadow,
+          ),
+          child: const Icon(Icons.today_rounded,
+              color: AppColors.primaryBlue, size: 22),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProductivitySection(ProductivityProvider provider) {
+    return AppCard(
+      child: Row(
         children: [
-          Icon(icon, size: 48, color: AppColors.textHint),
-          const SizedBox(height: 12),
-          Text(title, style: AppTextStyles.caption),
-          Text(subtitle,
-              style: AppTextStyles.caption.copyWith(fontSize: 12)),
+          AnimatedScoreRing(
+            score: provider.productivityIndex.toDouble(),
+            size: 120,
+            strokeWidth: 10,
+          ),
+          const SizedBox(width: 20),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Productivity Index',
+                    style: AppTextStyles.label.copyWith(letterSpacing: 0.5)),
+                const SizedBox(height: 4),
+                Text(
+                  _getScoreLabel(provider.productivityIndex),
+                  style: AppTextStyles.h3.copyWith(
+                    color: AppColors.productivityIndexColor(
+                        provider.productivityIndex.toDouble()),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '${provider.totalMinutes > 0 ? "${formatTime(provider.totalMinutes)} tracked" : "No time tracked"}',
+                  style: AppTextStyles.caption,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${provider.completedTasks}/${provider.totalTasks} tasks done',
+                  style: AppTextStyles.caption,
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildCategoryBars(Map<String, dynamic> breakdown) {
-    if (breakdown.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: _emptyChartPlaceholder(Icons.bar_chart_rounded,
-            'No category data', 'Log time blocks to see charts'),
-      );
-    }
-
-    final sortedEntries = breakdown.entries.toList()
-      ..sort((a, b) => (b.value as num).compareTo(a.value as num));
-    final maxMinutes = sortedEntries.isNotEmpty
-        ? (sortedEntries.first.value as num).toDouble()
-        : 1.0;
-
-    return Column(
-      children: sortedEntries.asMap().entries.map((mapEntry) {
-        final index = mapEntry.key;
-        final entry = mapEntry.value;
-        final minutes = (entry.value as num).toDouble();
-        final fraction = minutes / maxMinutes;
-        final color = _categoryColors[index % _categoryColors.length];
-
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    entry.key,
-                    style: AppTextStyles.caption.copyWith(
-                      color: AppColors.textPrimary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: color.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      formatTime(minutes),
-                      style: AppTextStyles.caption.copyWith(
-                        color: color,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: fraction,
-                  minHeight: 10,
-                  backgroundColor: color.withOpacity(0.08),
-                  valueColor: AlwaysStoppedAnimation<Color>(color),
-                ),
-              ),
-            ],
-          ),
-        );
-      }).toList(),
-    );
+  String _getScoreLabel(int score) {
+    if (score >= 80) return 'Excellent! 🔥';
+    if (score >= 60) return 'Great Work! 💪';
+    if (score >= 40) return 'Keep Going! ⚡';
+    if (score >= 20) return 'Needs Focus 🎯';
+    return 'Get Started! 🚀';
   }
 
-  Widget _buildTaskBars(Map<String, dynamic> breakdown) {
-    if (breakdown.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: _emptyChartPlaceholder(
-            Icons.stacked_bar_chart_rounded,
-            'No task data',
-            'Log time blocks to see task breakdown'),
-      );
-    }
-
-    final sortedEntries = breakdown.entries.toList()
-      ..sort((a, b) => (b.value as num).compareTo(a.value as num));
-    final maxMinutes = sortedEntries.isNotEmpty
-        ? (sortedEntries.first.value as num).toDouble()
-        : 1.0;
-
-    return Column(
-      children: sortedEntries.asMap().entries.map((mapEntry) {
-        final index = mapEntry.key;
-        final entry = mapEntry.value;
-        final minutes = (entry.value as num).toDouble();
-        final fraction = minutes / maxMinutes;
-        final color = _categoryColors[
-            (index + 3) % _categoryColors.length]; // offset palette
-
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Text(
-                      entry.key,
-                      style: AppTextStyles.caption.copyWith(
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: color.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      formatTime(minutes),
-                      style: AppTextStyles.caption.copyWith(
-                        color: color,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: fraction,
-                  minHeight: 10,
-                  backgroundColor: color.withOpacity(0.08),
-                  valueColor: AlwaysStoppedAnimation<Color>(color),
-                ),
-              ),
-            ],
-          ),
-        );
-      }).toList(),
-    );
-  }
-
-  Widget _buildProductivityByCategoryChart(
-      Map<String, dynamic> productivityByCategory) {
-    if (productivityByCategory.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: _emptyChartPlaceholder(Icons.analytics_rounded,
-            'No breakdown data', 'Log time to see productivity per category'),
-      );
-    }
-
-    return Column(
-      children: productivityByCategory.entries.map((entry) {
-        final Map<String, dynamic> prodData =
-            Map<String, dynamic>.from(entry.value);
-        final productive =
-            (prodData['productive'] as num?)?.toDouble() ?? 0;
-        final neutral =
-            (prodData['neutral'] as num?)?.toDouble() ?? 0;
-        final wasted = (prodData['wasted'] as num?)?.toDouble() ?? 0;
-        final totalCat = productive + neutral + wasted;
-
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    entry.key,
-                    style: AppTextStyles.caption.copyWith(
-                      color: AppColors.textPrimary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Text(
-                    '${totalCat.toInt() >= 60 ? formatTime(totalCat) : '${totalCat.toInt()}m'} total',
-                    style: AppTextStyles.caption.copyWith(
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(5),
-                child: SizedBox(
-                  height: 12,
-                  child: Row(
-                    children: [
-                      if (productive > 0)
-                        Expanded(
-                          flex: productive.toInt(),
-                          child: Container(
-                              color: AppColors.primaryGreen),
-                        ),
-                      if (neutral > 0)
-                        Expanded(
-                          flex: neutral.toInt(),
-                          child: Container(
-                              color: AppColors.softOrange),
-                        ),
-                      if (wasted > 0)
-                        Expanded(
-                          flex: wasted.toInt(),
-                          child: Container(
-                              color: AppColors.softPink),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Row(
-                children: [
-                  if (productive > 0)
-                    Text(
-                      '${formatTime(productive)} ✨  ',
-                      style: AppTextStyles.caption.copyWith(
-                          color: AppColors.primaryGreen, fontSize: 10),
-                    ),
-                  if (neutral > 0)
-                    Text(
-                      '${formatTime(neutral)} ⚡  ',
-                      style: AppTextStyles.caption.copyWith(
-                          color: AppColors.softOrange, fontSize: 10),
-                    ),
-                  if (wasted > 0)
-                    Text(
-                      '${formatTime(wasted)} 💤  ',
-                      style: AppTextStyles.caption.copyWith(
-                          color: AppColors.softPink, fontSize: 10),
-                    ),
-                ],
-              ),
-            ],
-          ),
-        );
-      }).toList(),
-    );
-  }
-
-  Widget _legendItem(String label, Color color) {
+  Widget _buildQuickStats(ProductivityProvider provider) {
     return Row(
       children: [
-        Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(3),
-          ),
+        Expanded(
+          child: _miniStat('Focused',
+              formatTime(provider.productiveMinutes), AppColors.productive),
         ),
-        const SizedBox(width: 6),
-        Text(label,
-            style: AppTextStyles.caption.copyWith(fontSize: 12)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _miniStat('Wasted',
+              formatTime(provider.wastedMinutes), AppColors.wasted),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _miniStat('Neutral',
+              formatTime(provider.neutralMinutes), AppColors.neutral),
+        ),
       ],
     );
   }
 
-  String _getGreeting() {
-    final hour = DateTime.now().hour;
-    if (hour < 12) return 'Morning ☀️';
-    if (hour < 17) return 'Afternoon 🌤️';
-    return 'Evening 🌙';
+  Widget _miniStat(String label, String value, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: AppShadows.softShadow,
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 32, height: 32,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              label == 'Focused'
+                  ? Icons.bolt_rounded
+                  : label == 'Wasted'
+                      ? Icons.warning_amber_rounded
+                      : Icons.balance_rounded,
+              color: color,
+              size: 16,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(value,
+              style: AppTextStyles.bodyBold.copyWith(fontSize: 16, color: color)),
+          const SizedBox(height: 2),
+          Text(label, style: AppTextStyles.caption.copyWith(fontSize: 10)),
+        ],
+      ),
+    );
   }
 
-  String _formattedDate() {
-    final now = DateTime.now();
-    final months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-    ];
-    return '${months[now.month - 1]} ${now.day}';
-  }
-
-  void _showAddTaskSheet(BuildContext context) {
-    _taskController.clear();
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        padding: EdgeInsets.fromLTRB(
-            24, 24, 24, MediaQuery.of(ctx).viewInsets.bottom + 24),
-        decoration: const BoxDecoration(
-          color: AppColors.surface,
-          borderRadius:
-              BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
+  // ─── Task Checklist ────────────────────────────────────
+  Widget _buildTaskChecklist(ProductivityProvider provider) {
+    return AppCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: AppColors.border,
-                  borderRadius: BorderRadius.circular(2),
+                  color: AppColors.primaryBlue.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.checklist_rounded,
+                    color: AppColors.primaryBlue, size: 18),
+              ),
+              const SizedBox(width: 12),
+              Text("Today's Tasks", style: AppTextStyles.h3),
+              const Spacer(),
+              if (provider.tasks.isNotEmpty)
+                Text(
+                  '${provider.tasks.where((t) => t.isCompleted).length}/${provider.tasks.length}',
+                  style: AppTextStyles.caption.copyWith(
+                    color: AppColors.primaryGreen, fontWeight: FontWeight.w600),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Task list
+          ...provider.tasks.map((task) => TaskListItem(
+                taskName: task.taskName,
+                isCompleted: task.isCompleted,
+                isLocked: true,
+                onToggle: task.isCompleted
+                    ? null
+                    : () => provider.completeTask(task),
+              )),
+
+          // Add task
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _taskController,
+                  style: AppTextStyles.bodyBold.copyWith(fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: 'Add a task (immutable after creation)...',
+                    hintStyle: AppTextStyles.caption.copyWith(
+                        color: AppColors.textHint, fontSize: 12),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
+                    filled: true,
+                    fillColor: AppColors.background,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none,
+                    ),
+                    suffixIcon: const Icon(Icons.lock_outline_rounded,
+                        size: 14, color: AppColors.textHint),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () {
+                  if (_taskController.text.trim().isNotEmpty) {
+                    provider.addTask(
+                        _taskController.text.trim(), DateTime.now());
+                    _taskController.clear();
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    gradient: AppColors.primaryGradient,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.add_rounded,
+                      color: Colors.white, size: 20),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Donut Chart: Category Time ────────────────────────
+  Widget _buildDonutChart(ProductivityProvider provider) {
+    final data = provider.categoryBreakdown;
+    if (data.isEmpty) {
+      return _emptyChartPlaceholder('Track time to see category breakdown');
+    }
+
+    final entries = data.entries.toList();
+    final total = entries.fold<double>(0, (s, e) => s + (e.value as num));
+
+    return Column(
+      children: [
+        SizedBox(
+          height: 200,
+          child: PieChart(
+            PieChartData(
+              sectionsSpace: 3,
+              centerSpaceRadius: 50,
+              sections: entries.asMap().entries.map((entry) {
+                final i = entry.key;
+                final e = entry.value;
+                final value = (e.value as num).toDouble();
+                final color = AppColors.categoryColor(e.key, i);
+                return PieChartSectionData(
+                  value: value,
+                  color: color,
+                  radius: 35,
+                  showTitle: false,
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 12, runSpacing: 6,
+          children: entries.asMap().entries.map((entry) {
+            final i = entry.key;
+            final e = entry.value;
+            final pct = total > 0
+                ? ((e.value as num) / total * 100).toStringAsFixed(0)
+                : '0';
+            return _legendItem(e.key, AppColors.categoryColor(e.key, i),
+                '${formatTime((e.value as num).toInt())} ($pct%)');
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  // ─── Pie Chart: Productive vs Unproductive ─────────────
+  Widget _buildProductivityPie(ProductivityProvider provider) {
+    final prod = provider.productiveMinutes.toDouble();
+    final neutral = provider.neutralMinutes.toDouble();
+    final wasted = provider.wastedMinutes.toDouble();
+    final total = prod + neutral + wasted;
+
+    if (total == 0) {
+      return _emptyChartPlaceholder('Track time to see productivity split');
+    }
+
+    return Column(
+      children: [
+        SizedBox(
+          height: 180,
+          child: PieChart(
+            PieChartData(
+              sectionsSpace: 3,
+              centerSpaceRadius: 40,
+              sections: [
+                PieChartSectionData(
+                    value: prod, color: AppColors.productive,
+                    radius: 30, showTitle: false),
+                PieChartSectionData(
+                    value: neutral, color: AppColors.neutral,
+                    radius: 30, showTitle: false),
+                PieChartSectionData(
+                    value: wasted, color: AppColors.wasted,
+                    radius: 30, showTitle: false),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _legendItem('Productive', AppColors.productive,
+                '${(prod / total * 100).toStringAsFixed(0)}%'),
+            const SizedBox(width: 16),
+            _legendItem('Neutral', AppColors.neutral,
+                '${(neutral / total * 100).toStringAsFixed(0)}%'),
+            const SizedBox(width: 16),
+            _legendItem('Wasted', AppColors.wasted,
+                '${(wasted / total * 100).toStringAsFixed(0)}%'),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ─── Bar Chart: Tasks Completed vs Missed ──────────────
+  Widget _buildTasksBarChart(ProductivityProvider provider) {
+    final trend = provider.weeklyTrend;
+    if (trend.isEmpty) {
+      return _emptyChartPlaceholder('Weekly data will appear here');
+    }
+
+    return SizedBox(
+      height: 200,
+      child: BarChart(
+        BarChartData(
+          barTouchData: BarTouchData(
+            touchTooltipData: BarTouchTooltipData(
+              getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                final day = trend[group.x.toInt()];
+                final label = rodIndex == 0 ? 'Done' : 'Missed';
+                return BarTooltipItem(
+                  '$label: ${rod.toY.toInt()}',
+                  AppTextStyles.caption.copyWith(
+                      color: Colors.white, fontSize: 11),
+                );
+              },
+            ),
+          ),
+          gridData: FlGridData(show: false),
+          borderData: FlBorderData(show: false),
+          titlesData: FlTitlesData(
+            leftTitles: const AxisTitles(
+                sideTitles: SideTitles(showTitles: false)),
+            rightTitles: const AxisTitles(
+                sideTitles: SideTitles(showTitles: false)),
+            topTitles: const AxisTitles(
+                sideTitles: SideTitles(showTitles: false)),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                getTitlesWidget: (value, meta) {
+                  final i = value.toInt();
+                  if (i < 0 || i >= trend.length) {
+                    return const Text('');
+                  }
+                  final date = trend[i]['date'] as String;
+                  final dayNames = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+                  final dt = DateTime.tryParse(date);
+                  return Text(
+                    dt != null ? dayNames[dt.weekday % 7] : '',
+                    style: AppTextStyles.caption.copyWith(fontSize: 10),
+                  );
+                },
+              ),
+            ),
+          ),
+          barGroups: trend.asMap().entries.map((entry) {
+            final i = entry.key;
+            final day = entry.value;
+            return BarChartGroupData(x: i, barRods: [
+              BarChartRodData(
+                toY: (day['tasksCompleted'] as num?)?.toDouble() ?? 0,
+                color: AppColors.primaryGreen,
+                width: 10,
+                borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(4)),
+              ),
+              BarChartRodData(
+                toY: (day['tasksMissed'] as num?)?.toDouble() ?? 0,
+                color: AppColors.wasted,
+                width: 10,
+                borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(4)),
+              ),
+            ]);
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  // ─── Line Chart: Productivity Trend ────────────────────
+  Widget _buildProductivityLineChart(ProductivityProvider provider) {
+    final trend = provider.weeklyTrend;
+    if (trend.isEmpty) {
+      return _emptyChartPlaceholder('Weekly data will appear here');
+    }
+
+    return SizedBox(
+      height: 200,
+      child: LineChart(
+        LineChartData(
+          gridData: FlGridData(
+            show: true,
+            drawVerticalLine: false,
+            horizontalInterval: 25,
+            getDrawingHorizontalLine: (value) => FlLine(
+              color: AppColors.border,
+              strokeWidth: 1,
+            ),
+          ),
+          borderData: FlBorderData(show: false),
+          titlesData: FlTitlesData(
+            leftTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 32,
+                getTitlesWidget: (value, meta) => Text(
+                  '${value.toInt()}',
+                  style: AppTextStyles.caption.copyWith(fontSize: 10),
                 ),
               ),
             ),
-            const SizedBox(height: 20),
-            Text('Add New Task', style: AppTextStyles.h3),
-            const SizedBox(height: 6),
-            Text(
-              'Once added, tasks cannot be edited or deleted',
-              style: AppTextStyles.caption.copyWith(
-                color: AppColors.softPink,
-                fontSize: 12,
+            rightTitles: const AxisTitles(
+                sideTitles: SideTitles(showTitles: false)),
+            topTitles: const AxisTitles(
+                sideTitles: SideTitles(showTitles: false)),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                getTitlesWidget: (value, meta) {
+                  final i = value.toInt();
+                  if (i < 0 || i >= trend.length) return const Text('');
+                  final date = trend[i]['date'] as String;
+                  final dt = DateTime.tryParse(date);
+                  final dayNames = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+                  return Text(
+                    dt != null ? dayNames[dt.weekday % 7] : '',
+                    style: AppTextStyles.caption.copyWith(fontSize: 10),
+                  );
+                },
               ),
             ),
-            const SizedBox(height: 20),
-            AppTextField(
-              hint: 'What do you need to do?',
-              prefixIcon: Icons.edit_outlined,
-              controller: _taskController,
-            ),
-            const SizedBox(height: 20),
-            GradientButton(
-              text: 'Add Task (Immutable)',
-              onPressed: () {
-                if (_taskController.text.isNotEmpty) {
-                  context
-                      .read<ProductivityProvider>()
-                      .addTask(_taskController.text, DateTime.now());
-                  Navigator.pop(ctx);
-                }
-              },
+          ),
+          minY: 0, maxY: 100,
+          lineBarsData: [
+            LineChartBarData(
+              spots: trend.asMap().entries.map((e) {
+                return FlSpot(
+                  e.key.toDouble(),
+                  (e.value['productivityIndex'] as num?)?.toDouble() ?? 0,
+                );
+              }).toList(),
+              color: AppColors.primaryBlue,
+              barWidth: 3,
+              isCurved: true,
+              curveSmoothness: 0.3,
+              dotData: FlDotData(
+                show: true,
+                getDotPainter: (spot, p, bar, i) => FlDotCirclePainter(
+                  radius: 4,
+                  color: AppColors.primaryBlue,
+                  strokeWidth: 2,
+                  strokeColor: Colors.white,
+                ),
+              ),
+              belowBarData: BarAreaData(
+                show: true,
+                color: AppColors.primaryBlue.withValues(alpha: 0.08),
+              ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // ─── Area Chart: Cumulative Focus ──────────────────────
+  Widget _buildCumulativeAreaChart(ProductivityProvider provider) {
+    final data = provider.cumulativeFocus;
+    if (data.isEmpty) {
+      return _emptyChartPlaceholder('Focus data will appear here');
+    }
+
+    final maxY = data.fold<double>(
+        0, (m, d) => (d['cumulativeMinutes'] as num).toDouble() > m
+            ? (d['cumulativeMinutes'] as num).toDouble()
+            : m);
+
+    return SizedBox(
+      height: 180,
+      child: LineChart(
+        LineChartData(
+          gridData: FlGridData(show: false),
+          borderData: FlBorderData(show: false),
+          titlesData: FlTitlesData(
+            leftTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 40,
+                getTitlesWidget: (value, meta) => Text(
+                  formatTime(value.toInt()),
+                  style: AppTextStyles.caption.copyWith(fontSize: 9),
+                ),
+              ),
+            ),
+            rightTitles: const AxisTitles(
+                sideTitles: SideTitles(showTitles: false)),
+            topTitles: const AxisTitles(
+                sideTitles: SideTitles(showTitles: false)),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                getTitlesWidget: (value, meta) {
+                  final i = value.toInt();
+                  if (i < 0 || i >= data.length) return const Text('');
+                  final date = data[i]['date'] as String;
+                  return Text(
+                    date.substring(8, 10),
+                    style: AppTextStyles.caption.copyWith(fontSize: 10),
+                  );
+                },
+              ),
+            ),
+          ),
+          minY: 0,
+          maxY: maxY > 0 ? maxY * 1.2 : 100,
+          lineBarsData: [
+            LineChartBarData(
+              spots: data.asMap().entries.map((e) {
+                return FlSpot(
+                  e.key.toDouble(),
+                  (e.value['cumulativeMinutes'] as num).toDouble(),
+                );
+              }).toList(),
+              color: AppColors.softTeal,
+              barWidth: 3,
+              isCurved: true,
+              curveSmoothness: 0.3,
+              dotData: const FlDotData(show: false),
+              belowBarData: BarAreaData(
+                show: true,
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    AppColors.softTeal.withValues(alpha: 0.3),
+                    AppColors.softTeal.withValues(alpha: 0.02),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── Scatter Plot: Time vs Productivity ────────────────
+  Widget _buildScatterPlot(ProductivityProvider provider) {
+    final catBreakdown = provider.categoryBreakdown;
+    final prodByCat = provider.productivityByCategory;
+
+    if (catBreakdown.isEmpty) {
+      return _emptyChartPlaceholder('Category data will appear here');
+    }
+
+    final spots = <ScatterSpot>[];
+    final categories = catBreakdown.keys.toList();
+
+    for (int i = 0; i < categories.length; i++) {
+      final cat = categories[i];
+      final totalMin = (catBreakdown[cat] as num?)?.toDouble() ?? 0;
+      final prodData = prodByCat[cat];
+      double prodRate = 0;
+      if (prodData != null) {
+        final prodMin = (prodData['productive'] as num?)?.toDouble() ?? 0;
+        prodRate = totalMin > 0 ? (prodMin / totalMin * 100) : 0;
+      }
+      spots.add(ScatterSpot(
+        totalMin,
+        prodRate,
+        dotPainter: FlDotCirclePainter(
+          radius: 8,
+          color: AppColors.categoryColor(cat, i).withValues(alpha: 0.8),
+          strokeWidth: 2,
+          strokeColor: AppColors.categoryColor(cat, i),
+        ),
+      ));
+    }
+
+    return Column(
+      children: [
+        SizedBox(
+          height: 200,
+          child: ScatterChart(
+            ScatterChartData(
+              scatterSpots: spots,
+              gridData: FlGridData(
+                show: true,
+                drawVerticalLine: false,
+                horizontalInterval: 25,
+                getDrawingHorizontalLine: (value) =>
+                    FlLine(color: AppColors.border, strokeWidth: 1),
+              ),
+              borderData: FlBorderData(show: false),
+              titlesData: FlTitlesData(
+                leftTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 30,
+                    getTitlesWidget: (v, m) => Text('${v.toInt()}%',
+                        style: AppTextStyles.caption.copyWith(fontSize: 9)),
+                  ),
+                ),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    getTitlesWidget: (v, m) => Text('${v.toInt()}m',
+                        style: AppTextStyles.caption.copyWith(fontSize: 9)),
+                  ),
+                ),
+                rightTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false)),
+                topTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false)),
+              ),
+              minY: 0, maxY: 100,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text('X = Time spent  •  Y = Productivity %',
+            style: AppTextStyles.caption.copyWith(fontSize: 10)),
+      ],
+    );
+  }
+
+  // ─── AI Insights Card ─────────────────────────────────
+  Widget _buildAIInsightsCard(ProductivityProvider provider) {
+    final data = provider.aiInsightsData;
+    final insights = List<Map<String, dynamic>>.from(data['insights'] ?? []);
+    final summary = data['summary'] as String? ?? '';
+
+    return CollapsibleCard(
+      title: 'AI Insights',
+      icon: Icons.auto_awesome_rounded,
+      iconColor: AppColors.softYellow,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (summary.isNotEmpty) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.primaryBlue.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(summary, style: AppTextStyles.body.copyWith(
+                fontSize: 13, height: 1.4)),
+            ),
+            const SizedBox(height: 12),
+          ],
+          ...insights.map((insight) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(insight['icon'] ?? '💡',
+                      style: const TextStyle(fontSize: 16)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      insight['text'] ?? '',
+                      style: AppTextStyles.body.copyWith(
+                          fontSize: 13, height: 1.4),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  // ─── Helpers ───────────────────────────────────────────
+
+  Widget _legendItem(String label, Color color, String value) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8, height: 8,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(4),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text('$label $value',
+            style: AppTextStyles.caption.copyWith(fontSize: 10)),
+      ],
+    );
+  }
+
+  Widget _emptyChartPlaceholder(String text) {
+    return Container(
+      height: 120,
+      alignment: Alignment.center,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.analytics_outlined,
+              size: 32, color: AppColors.textHint),
+          const SizedBox(height: 8),
+          Text(text, style: AppTextStyles.caption),
+        ],
       ),
     );
   }

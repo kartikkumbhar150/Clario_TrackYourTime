@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../core/app_theme.dart';
+import '../providers/productivity_provider.dart';
 import 'dashboard_screen.dart';
 import 'timeline_screen.dart';
 import 'profile_screen.dart';
@@ -23,18 +25,27 @@ class _HomeShellState extends State<HomeShell> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    // Preload data on app launch
+    Future.microtask(() {
+      context.read<ProductivityProvider>().loadDailyData(DateTime.now());
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 300),
-        child: _screens[_currentIndex],
+      body: IndexedStack(
+        index: _currentIndex,
+        children: _screens,
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: AppColors.surface,
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.06),
+              color: Colors.black.withValues(alpha: 0.06),
               blurRadius: 20,
               offset: const Offset(0, -4),
             ),
@@ -61,7 +72,15 @@ class _HomeShellState extends State<HomeShell> {
   Widget _navItem(int index, IconData icon, String label) {
     final isActive = _currentIndex == index;
     return GestureDetector(
-      onTap: () => setState(() => _currentIndex = index),
+      onTap: () {
+        setState(() => _currentIndex = index);
+        // Preload relevant data on tab switch
+        final provider = context.read<ProductivityProvider>();
+        if (index == 0 && !provider.weeklyTrendLoaded) {
+          provider.loadWeeklyTrend();
+          provider.loadAIInsights();
+        }
+      },
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
@@ -70,7 +89,9 @@ class _HomeShellState extends State<HomeShell> {
           vertical: 8,
         ),
         decoration: BoxDecoration(
-          color: isActive ? AppColors.primaryBlue.withOpacity(0.1) : Colors.transparent,
+          color: isActive
+              ? AppColors.primaryBlue.withValues(alpha: 0.1)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(

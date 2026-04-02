@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:intl/intl.dart';
 import '../core/app_theme.dart';
-import '../widgets/app_widgets.dart';
+import '../core/time_utils.dart';
 import '../models/time_slot.dart';
 import '../providers/productivity_provider.dart';
+import '../widgets/app_widgets.dart';
 
 class TimelineScreen extends StatefulWidget {
   const TimelineScreen({super.key});
@@ -13,331 +13,322 @@ class TimelineScreen extends StatefulWidget {
   State<TimelineScreen> createState() => _TimelineScreenState();
 }
 
-class _TimelineScreenState extends State<TimelineScreen> {
+class _TimelineScreenState extends State<TimelineScreen>
+    with SingleTickerProviderStateMixin {
   late ScrollController _scrollController;
-  final double _itemHeight = 72.0; // approximate height per block
+  late AnimationController _animController;
+  bool _showActual = true; // Planned vs Actual toggle
 
-  List<String> _generateTimeBlocks() {
-    List<String> blocks = [];
-    DateTime start = DateTime(2020, 1, 1, 0, 0);
-    for (int i = 0; i < 72; i++) {
-      String from = DateFormat('HH:mm').format(start);
-      start = start.add(const Duration(minutes: 20));
-      String to = DateFormat('HH:mm').format(start);
-      blocks.add('$from-$to');
+  // Generate all 72 time blocks for the day (24h × 3 per hour = 72 blocks of 20min)
+  List<String> get _timeBlocks {
+    final blocks = <String>[];
+    for (int h = 0; h < 24; h++) {
+      for (int m = 0; m < 60; m += 20) {
+        final start = '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+        final endM = m + 20;
+        final endH = endM >= 60 ? h + 1 : h;
+        final endMin = endM >= 60 ? 0 : endM;
+        final end = '${endH.toString().padLeft(2, '0')}:${endMin.toString().padLeft(2, '0')}';
+        blocks.add('$start-$end');
+      }
     }
     return blocks;
   }
 
-  int _getCurrentBlockIndex() {
+  int get _currentBlockIndex {
     final now = DateTime.now();
-    final minutesSinceMidnight = now.hour * 60 + now.minute;
-    return (minutesSinceMidnight / 20).floor().clamp(0, 71);
+    return (now.hour * 3) + (now.minute ~/ 20);
   }
 
   @override
   void initState() {
     super.initState();
     _scrollController = ScrollController();
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    )..forward();
 
-    // Auto-scroll to current time block after build
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final currentIndex = _getCurrentBlockIndex();
-      // Scroll so current block is near the top (show 1-2 past blocks above)
-      final targetOffset = ((currentIndex - 2).clamp(0, 71)) * _itemHeight;
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          targetOffset,
-          duration: const Duration(milliseconds: 600),
-          curve: Curves.easeOutCubic,
-        );
-      }
+    Future.microtask(() {
+      context.read<ProductivityProvider>().loadDailyData(DateTime.now());
     });
+
+    // Auto-scroll to current time block
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToCurrentBlock();
+    });
+  }
+
+  void _scrollToCurrentBlock() {
+    final targetOffset = (_currentBlockIndex * 78.0) - 200;
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+        duration: const Duration(milliseconds: 600),
+        curve: Curves.easeOutCubic,
+      );
+    }
   }
 
   @override
   void dispose() {
     _scrollController.dispose();
+    _animController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final blocks = _generateTimeBlocks();
-
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Consumer<ProductivityProvider>(
+          builder: (context, provider, _) {
+            return Column(
+              children: [
+                // Header
+                _buildHeader(),
+
+                // Summary strip
+                _buildSummaryStrip(provider),
+
+                const SizedBox(height: 8),
+
+                // Planned / Actual toggle
+                _buildViewToggle(),
+
+                const SizedBox(height: 8),
+
+                // Timeline
+                Expanded(
+                  child: provider.isLoading
+                      ? const Center(
+                          child: CircularProgressIndicator(
+                              color: AppColors.primaryBlue))
+                      : _buildTimeline(provider),
+                ),
+
+                // Category legend
+                _buildCategoryLegend(provider),
+              ],
+            );
+          },
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _scrollToCurrentBlock,
+        backgroundColor: AppColors.primaryBlue,
+        child: const Icon(Icons.my_location_rounded, color: Colors.white),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    final now = DateTime.now();
+    final dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    final monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+      child: Row(
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Timeline', style: AppTextStyles.h1),
+              const SizedBox(height: 2),
+              Text(
+                '${dayNames[now.weekday % 7]}, ${now.day} ${monthNames[now.month - 1]}',
+                style: AppTextStyles.caption,
+              ),
+            ],
+          ),
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              gradient: AppColors.primaryGradient,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              '${_currentBlockIndex}/72 blocks',
+              style: AppTextStyles.caption.copyWith(
+                color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSummaryStrip(ProductivityProvider provider) {
+    final slots = provider.slots;
+    int focused = 0, distracted = 0;
+    for (final s in slots) {
+      if (s.type == ProductivityType.productive) focused++;
+      else if (s.type == ProductivityType.wasted) distracted++;
+    }
+    final free = 72 - slots.length;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Row(
+        children: [
+          Expanded(
+            child: SummaryPill(
+              label: 'Focused',
+              value: formatTime(focused * 20),
+              color: AppColors.productive,
+              icon: Icons.bolt_rounded,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: SummaryPill(
+              label: 'Distracted',
+              value: formatTime(distracted * 20),
+              color: AppColors.wasted,
+              icon: Icons.warning_amber_rounded,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: SummaryPill(
+              label: 'Free',
+              value: '$free slots',
+              color: AppColors.primaryBlue,
+              icon: Icons.schedule_rounded,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildViewToggle() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: AppColors.background,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
           children: [
-            // Header
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Time Blocks', style: AppTextStyles.h1),
-                      const SizedBox(height: 4),
-                      Text(
-                        '72 slots • 20 min each • Tap to log',
-                        style: AppTextStyles.caption,
-                      ),
-                    ],
-                  ),
-                  // Jump to now button
-                  GestureDetector(
-                    onTap: () {
-                      final currentIndex = _getCurrentBlockIndex();
-                      final targetOffset =
-                          ((currentIndex - 2).clamp(0, 71)) * _itemHeight;
-                      _scrollController.animateTo(
-                        targetOffset,
-                        duration: const Duration(milliseconds: 400),
-                        curve: Curves.easeOutCubic,
-                      );
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        gradient: AppColors.primaryGradient,
-                        borderRadius: BorderRadius.circular(10),
-                        boxShadow: AppShadows.buttonShadow,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.my_location_rounded,
-                              size: 14, color: Colors.white),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Now',
-                            style: AppTextStyles.caption.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            // Timeline List
-            Expanded(
-              child: Consumer<ProductivityProvider>(
-                builder: (context, provider, _) {
-                  return ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    itemCount: blocks.length,
-                    itemBuilder: (context, index) {
-                      return _buildTimeBlock(
-                          context, blocks[index], index, provider.slots);
-                    },
-                  );
-                },
-              ),
-            ),
+            Expanded(child: _toggleButton('Actual', _showActual, () {
+              setState(() => _showActual = true);
+            })),
+            Expanded(child: _toggleButton('Planned', !_showActual, () {
+              setState(() => _showActual = false);
+            })),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildTimeBlock(BuildContext context, String timeRange, int index,
-      List<TimeSlot> slots) {
-    final now = DateTime.now();
-    final hour = int.parse(timeRange.substring(0, 2));
-    final minute = int.parse(timeRange.substring(3, 5));
-    final blockStartMinutes = hour * 60 + minute;
-    final nowMinutes = now.hour * 60 + now.minute;
-
-    final isCurrentBlock =
-        nowMinutes >= blockStartMinutes && nowMinutes < blockStartMinutes + 20;
-    final isPastBlock = nowMinutes >= blockStartMinutes + 20;
-
-    // Check if this block has been logged
-    final existingSlot = slots.where((s) => s.timeRange == timeRange).isNotEmpty
-        ? slots.firstWhere((s) => s.timeRange == timeRange)
-        : null;
-
-    // Determine colors and labels
-    Color blockColor;
-    Color textColor;
-    Color timeTextColor;
-    String statusLabel;
-    IconData statusIcon;
-    double opacity;
-
-    if (existingSlot != null) {
-      opacity = isPastBlock ? 0.6 : 1.0;
-      switch (existingSlot.type) {
-        case ProductivityType.productive:
-          blockColor = AppColors.primaryGreen.withOpacity(isPastBlock ? 0.05 : 0.08);
-          textColor = AppColors.primaryGreen.withOpacity(opacity);
-          timeTextColor = AppColors.primaryGreen.withOpacity(opacity);
-          statusLabel = '✨ Productive';
-          statusIcon = Icons.check_circle_rounded;
-          break;
-        case ProductivityType.neutral:
-          blockColor = AppColors.softOrange.withOpacity(isPastBlock ? 0.05 : 0.08);
-          textColor = AppColors.softOrange.withOpacity(opacity);
-          timeTextColor = AppColors.softOrange.withOpacity(opacity);
-          statusLabel = '⚡ Neutral';
-          statusIcon = Icons.remove_circle_rounded;
-          break;
-        case ProductivityType.wasted:
-          blockColor = AppColors.softPink.withOpacity(isPastBlock ? 0.05 : 0.08);
-          textColor = AppColors.softPink.withOpacity(opacity);
-          timeTextColor = AppColors.softPink.withOpacity(opacity);
-          statusLabel = '💤 Wasted';
-          statusIcon = Icons.cancel_rounded;
-          break;
-      }
-    } else if (isCurrentBlock) {
-      blockColor = AppColors.primaryBlue.withOpacity(0.08);
-      textColor = AppColors.primaryBlue;
-      timeTextColor = AppColors.primaryBlue;
-      statusLabel = '● NOW';
-      statusIcon = Icons.access_time_filled_rounded;
-      opacity = 1.0;
-    } else if (isPastBlock) {
-      // Past unlogged blocks = dark/muted
-      blockColor = const Color(0xFFF0F0F4);
-      textColor = AppColors.textHint;
-      timeTextColor = AppColors.textHint;
-      statusLabel = 'Missed';
-      statusIcon = Icons.remove_rounded;
-      opacity = 0.5;
-    } else {
-      // Future blocks
-      blockColor = AppColors.surface;
-      textColor = AppColors.textTertiary;
-      timeTextColor = AppColors.textPrimary;
-      statusLabel = 'Log';
-      statusIcon = Icons.add_rounded;
-      opacity = 1.0;
-    }
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: GestureDetector(
-        onTap: () => _showQuickEntrySheet(context, timeRange),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: blockColor,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: isCurrentBlock
-                  ? AppColors.primaryBlue.withOpacity(0.4)
-                  : existingSlot != null
-                      ? textColor.withOpacity(0.2)
-                      : isPastBlock
-                          ? AppColors.border.withOpacity(0.3)
-                          : AppColors.border.withOpacity(0.5),
-              width: isCurrentBlock ? 2 : 1,
+  Widget _toggleButton(String label, bool active, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          color: active ? AppColors.surface : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: active ? AppShadows.softShadow : null,
+        ),
+        child: Center(
+          child: Text(
+            label,
+            style: AppTextStyles.caption.copyWith(
+              color: active ? AppColors.primaryBlue : AppColors.textTertiary,
+              fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+              fontSize: 12,
             ),
-            boxShadow: isCurrentBlock
-                ? [
-                    BoxShadow(
-                      color: AppColors.primaryBlue.withOpacity(0.15),
-                      blurRadius: 16,
-                      offset: const Offset(0, 4),
-                    )
-                  ]
-                : AppShadows.softShadow,
           ),
-          child: Row(
-            children: [
-              // Time indicator bar
-              Container(
-                width: 4,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: isCurrentBlock
-                      ? AppColors.primaryBlue
-                      : existingSlot != null
-                          ? textColor
-                          : isPastBlock
-                              ? AppColors.border.withOpacity(0.4)
-                              : AppColors.border,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(width: 12),
-              // Time range text
-              SizedBox(
-                width: 95,
-                child: Text(
-                  timeRange,
-                  style: AppTextStyles.bodyBold.copyWith(
-                    color: timeTextColor,
-                    fontSize: 13,
-                    fontFamily: 'monospace',
-                    fontWeight: isCurrentBlock ? FontWeight.w700 : FontWeight.w600,
-                  ),
-                ),
-              ),
-              // Category label for logged slots
-              if (existingSlot != null)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: textColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    existingSlot.category,
-                    style: AppTextStyles.caption.copyWith(
-                      color: textColor,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTimeline(ProductivityProvider provider) {
+    final blocks = _timeBlocks;
+    final currentIdx = _currentBlockIndex;
+
+    return ListView.builder(
+      controller: _scrollController,
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
+      itemCount: blocks.length,
+      itemBuilder: (context, index) {
+        final timeRange = blocks[index];
+        final existingSlot = provider.slots
+            .where((s) => s.timeRange == timeRange)
+            .isNotEmpty
+            ? provider.slots.firstWhere((s) => s.timeRange == timeRange)
+            : null;
+
+        final isCurrent = index == currentIdx;
+        final isPast = index < currentIdx;
+        final isMissed = isPast && existingSlot == null;
+
+        return _TimeBlock(
+          timeRange: timeRange,
+          slot: existingSlot,
+          isCurrent: isCurrent,
+          isPast: isPast,
+          isMissed: isMissed,
+          index: index,
+          onTap: () => _showQuickEntrySheet(context, timeRange),
+        );
+      },
+    );
+  }
+
+  Widget _buildCategoryLegend(ProductivityProvider provider) {
+    final usedCategories = <String>{};
+    for (final s in provider.slots) {
+      usedCategories.add(s.category);
+    }
+    if (usedCategories.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: usedCategories.map((cat) {
+            final color = AppColors.categoryColor(cat);
+            return Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 8, height: 8,
+                    decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: BorderRadius.circular(4),
                     ),
                   ),
-                ),
-              const Spacer(),
-              // Status badge
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: isCurrentBlock
-                      ? AppColors.primaryBlue.withOpacity(0.12)
-                      : existingSlot != null
-                          ? textColor.withOpacity(0.1)
-                          : isPastBlock
-                              ? Colors.transparent
-                              : AppColors.background,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(statusIcon, size: 14, color: textColor),
-                    const SizedBox(width: 4),
-                    Text(
-                      statusLabel,
-                      style: AppTextStyles.caption.copyWith(
-                        color: textColor,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
+                  const SizedBox(width: 4),
+                  Text(cat, style: AppTextStyles.caption.copyWith(fontSize: 10)),
+                ],
               ),
-            ],
-          ),
+            );
+          }).toList(),
         ),
       ),
     );
@@ -347,14 +338,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
     final provider = context.read<ProductivityProvider>();
     final categories = provider.categories;
 
-    // Check if slot already exists for this timeRange
     final existingSlot = provider.slots
         .where((s) => s.timeRange == timeRange)
         .isNotEmpty
         ? provider.slots.firstWhere((s) => s.timeRange == timeRange)
         : null;
 
-    // Pre-fill with existing data or defaults
     String selectedCategory = existingSlot != null
         ? existingSlot.category
         : (categories.isNotEmpty ? categories.first : 'Other');
@@ -367,215 +356,239 @@ class _TimelineScreenState extends State<TimelineScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) => Container(
-          padding: const EdgeInsets.all(24),
+        builder: (ctx, setModalState) => Container(
           decoration: const BoxDecoration(
             color: AppColors.surface,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
+          padding: EdgeInsets.fromLTRB(
+              24, 16, 24, MediaQuery.of(ctx).viewInsets.bottom + 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Handle bar
               Center(
                 child: Container(
-                  width: 40,
-                  height: 4,
+                  width: 40, height: 4,
                   decoration: BoxDecoration(
                     color: AppColors.border,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
+
+              // Time range header
               Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(10),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
-                      gradient: isEditing
-                          ? AppColors.warmGradient
-                          : AppColors.primaryGradient,
-                      borderRadius: BorderRadius.circular(12),
+                      gradient: AppColors.primaryGradient,
+                      borderRadius: BorderRadius.circular(20),
                     ),
-                    child: Icon(
-                        isEditing
-                            ? Icons.edit_rounded
-                            : Icons.schedule_rounded,
-                        color: Colors.white,
-                        size: 18),
+                    child: Text(timeRange,
+                        style: AppTextStyles.caption.copyWith(
+                            color: Colors.white, fontWeight: FontWeight.w700)),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                            isEditing
-                                ? 'Edit $timeRange'
-                                : 'Log $timeRange',
-                            style: AppTextStyles.h3),
-                        Text(
-                            isEditing
-                                ? 'Update or delete this entry'
-                                : 'Quick entry • 20 min block',
-                            style: AppTextStyles.caption
-                                .copyWith(fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                  // Delete button for existing slots
-                  if (isEditing)
+                  const SizedBox(width: 10),
+                  Text(isEditing ? 'Edit Block' : 'Log Activity',
+                      style: AppTextStyles.h3),
+                  const Spacer(),
+                  if (isEditing && existingSlot?.id != null)
                     GestureDetector(
                       onTap: () {
                         Navigator.pop(ctx);
                         provider.deleteTimeSlot(existingSlot!.id!);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('$timeRange entry deleted'),
-                            backgroundColor: AppColors.softPink,
-                            behavior: SnackBarBehavior.floating,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                          ),
-                        );
                       },
                       child: Container(
-                        padding: const EdgeInsets.all(10),
+                        padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: AppColors.softPink.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
+                          color: AppColors.wasted.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
                         ),
                         child: const Icon(Icons.delete_outline_rounded,
-                            color: AppColors.softPink, size: 20),
+                            color: AppColors.wasted, size: 18),
                       ),
                     ),
                 ],
               ),
-              const SizedBox(height: 24),
-              Text('HOW WAS THIS TIME?',
-                  style: AppTextStyles.label.copyWith(letterSpacing: 1)),
-              const SizedBox(height: 12),
+              const SizedBox(height: 20),
+
+              // Step 1: Productivity Type
+              Text('How was this time?',
+                  style: AppTextStyles.label.copyWith(letterSpacing: 0.5)),
+              const SizedBox(height: 10),
               Row(
                 children: [
-                  Expanded(
-                    child: ProductivityChip(
-                      label: '✨ Productive',
-                      color: AppColors.primaryGreen,
-                      selected:
-                          selectedType == ProductivityType.productive,
-                      onTap: () => setSheetState(() =>
-                          selectedType = ProductivityType.productive),
-                    ),
+                  _productivityButton(
+                    '✨ Productive',
+                    AppColors.productive,
+                    selectedType == ProductivityType.productive,
+                    () => setModalState(
+                        () => selectedType = ProductivityType.productive),
                   ),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: ProductivityChip(
-                      label: '⚡ Neutral',
-                      color: AppColors.softOrange,
-                      selected:
-                          selectedType == ProductivityType.neutral,
-                      onTap: () => setSheetState(
-                          () => selectedType = ProductivityType.neutral),
-                    ),
+                  _productivityButton(
+                    '⚡ Neutral',
+                    AppColors.neutral,
+                    selectedType == ProductivityType.neutral,
+                    () => setModalState(
+                        () => selectedType = ProductivityType.neutral),
                   ),
                   const SizedBox(width: 8),
-                  Expanded(
-                    child: ProductivityChip(
-                      label: '💤 Wasted',
-                      color: AppColors.softPink,
-                      selected:
-                          selectedType == ProductivityType.wasted,
-                      onTap: () => setSheetState(
-                          () => selectedType = ProductivityType.wasted),
-                    ),
+                  _productivityButton(
+                    '💤 Wasted',
+                    AppColors.wasted,
+                    selectedType == ProductivityType.wasted,
+                    () => setModalState(
+                        () => selectedType = ProductivityType.wasted),
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
-              Text('CATEGORY / TASK',
-                  style: AppTextStyles.label.copyWith(letterSpacing: 1)),
-              const SizedBox(height: 12),
+              const SizedBox(height: 20),
+
+              // Step 2: Category
+              Text('Category',
+                  style: AppTextStyles.label.copyWith(letterSpacing: 0.5)),
+              const SizedBox(height: 10),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: categories.isEmpty
-                    ? [
-                        Text('No categories — add in Settings',
-                            style: AppTextStyles.caption)
-                      ]
-                    : categories.map((cat) {
-                        final isSelected = cat == selectedCategory;
-                        return GestureDetector(
-                          onTap: () =>
-                              setSheetState(() => selectedCategory = cat),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 8),
+                spacing: 8, runSpacing: 8,
+                children: categories.map((cat) {
+                  final color = AppColors.categoryColor(cat);
+                  final isSelected = cat == selectedCategory;
+                  return GestureDetector(
+                    onTap: () => setModalState(() => selectedCategory = cat),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? color.withValues(alpha: 0.15)
+                            : AppColors.background,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: isSelected ? color : AppColors.border,
+                          width: isSelected ? 1.5 : 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 8, height: 8,
                             decoration: BoxDecoration(
-                              color: isSelected
-                                  ? AppColors.primaryBlue.withOpacity(0.1)
-                                  : AppColors.background,
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: isSelected
-                                    ? AppColors.primaryBlue
-                                    : AppColors.border,
-                              ),
+                              color: color,
+                              borderRadius: BorderRadius.circular(4),
                             ),
-                            child: Text(
-                              cat,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(cat,
                               style: AppTextStyles.caption.copyWith(
                                 color: isSelected
-                                    ? AppColors.primaryBlue
+                                    ? color
                                     : AppColors.textSecondary,
                                 fontWeight: isSelected
                                     ? FontWeight.w600
                                     : FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        );
-                      }).toList(),
-              ),
-              const SizedBox(height: 28),
-              GradientButton(
-                text: isEditing ? 'Update Time Block' : 'Save Time Block',
-                onPressed: () {
-                  if (isEditing && existingSlot!.id != null) {
-                    final typeName = selectedType.name;
-                    final capitalizedType = typeName[0].toUpperCase() + typeName.substring(1);
-                    provider.updateTimeSlot(
-                      existingSlot!.id!,
-                      taskSelected: selectedCategory,
-                      category: selectedCategory,
-                      productivityType: capitalizedType,
-                    );
-                  } else {
-                    provider.addTimeSlot(TimeSlot(
-                      date: DateTime.now().toIso8601String(),
-                      timeRange: timeRange,
-                      taskSelected: selectedCategory,
-                      category: selectedCategory,
-                      type: selectedType,
-                    ));
-                  }
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                          '$timeRange ${isEditing ? "updated" : "logged"} as ${selectedType.name}'),
-                      backgroundColor: AppColors.primaryGreen,
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
+                                fontSize: 12,
+                              )),
+                        ],
+                      ),
                     ),
                   );
+                }).toList(),
+              ),
+              const SizedBox(height: 24),
+
+              // Step 3: Save
+              GradientButton(
+                text: isEditing ? 'Update Block' : 'Save Block',
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  try {
+                    if (isEditing && existingSlot!.id != null) {
+                      final typeName = selectedType.name;
+                      final capitalizedType =
+                          typeName[0].toUpperCase() + typeName.substring(1);
+                      await provider.updateTimeSlot(
+                        existingSlot.id!,
+                        taskSelected: selectedCategory,
+                        category: selectedCategory,
+                        productivityType: capitalizedType,
+                      );
+                    } else {
+                      final now = DateTime.now();
+                      final cleanDate =
+                          DateTime(now.year, now.month, now.day, 12, 0, 0);
+                      await provider.addTimeSlot(TimeSlot(
+                        date: cleanDate.toIso8601String(),
+                        timeRange: timeRange,
+                        taskSelected: selectedCategory,
+                        category: selectedCategory,
+                        type: selectedType,
+                      ));
+                    }
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                              '$timeRange ${isEditing ? "updated" : "logged"} as ${selectedType.name}'),
+                          backgroundColor: AppColors.primaryGreen,
+                          behavior: SnackBarBehavior.floating,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Failed: ${e.toString().replaceAll("Exception: ", "")}'),
+                          backgroundColor: AppColors.wasted,
+                          behavior: SnackBarBehavior.floating,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                      );
+                    }
+                  }
                 },
               ),
-              const SizedBox(height: 8),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _productivityButton(
+      String label, Color color, bool selected, VoidCallback onTap) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? color.withValues(alpha: 0.15) : AppColors.background,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selected ? color : AppColors.border,
+              width: selected ? 1.5 : 1,
+            ),
+          ),
+          child: Center(
+            child: Text(label,
+                style: AppTextStyles.caption.copyWith(
+                  color: selected ? color : AppColors.textSecondary,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                  fontSize: 11,
+                )),
           ),
         ),
       ),
@@ -583,3 +596,188 @@ class _TimelineScreenState extends State<TimelineScreen> {
   }
 }
 
+// ─── Individual Time Block Widget ────────────────────
+class _TimeBlock extends StatelessWidget {
+  final String timeRange;
+  final TimeSlot? slot;
+  final bool isCurrent;
+  final bool isPast;
+  final bool isMissed;
+  final int index;
+  final VoidCallback onTap;
+
+  const _TimeBlock({
+    required this.timeRange,
+    this.slot,
+    required this.isCurrent,
+    required this.isPast,
+    required this.isMissed,
+    required this.index,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final startTime = timeRange.split('-')[0];
+    final isLogged = slot != null;
+    final catColor = isLogged
+        ? AppColors.categoryColor(slot!.category)
+        : AppColors.border;
+
+    Color bgColor;
+    if (isCurrent) {
+      bgColor = AppColors.primaryBlue.withValues(alpha: 0.04);
+    } else if (isLogged) {
+      bgColor = catColor.withValues(alpha: 0.04);
+    } else {
+      bgColor = Colors.transparent;
+    }
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        margin: const EdgeInsets.only(bottom: 4),
+        child: IntrinsicHeight(
+          child: Row(
+            children: [
+              // Time label
+              SizedBox(
+                width: 48,
+                child: Text(
+                  startTime,
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: isCurrent
+                        ? AppColors.primaryBlue
+                        : isPast
+                            ? AppColors.textTertiary
+                            : AppColors.textSecondary,
+                  ),
+                ),
+              ),
+
+              // Color indicator bar
+              Container(
+                width: 4,
+                decoration: BoxDecoration(
+                  color: isCurrent
+                      ? AppColors.primaryBlue
+                      : isLogged
+                          ? _typeColor(slot!.type)
+                          : isMissed
+                              ? AppColors.border
+                              : AppColors.divider,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 10),
+
+              // Content card
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: bgColor,
+                    borderRadius: BorderRadius.circular(12),
+                    border: isCurrent
+                        ? Border.all(
+                            color: AppColors.primaryBlue.withValues(alpha: 0.3),
+                            width: 1.5)
+                        : isLogged
+                            ? Border.all(
+                                color: catColor.withValues(alpha: 0.15))
+                            : null,
+                  ),
+                  child: Row(
+                    children: [
+                      // Category dot + name
+                      if (isLogged) ...[
+                        Container(
+                          width: 8, height: 8,
+                          decoration: BoxDecoration(
+                            color: catColor,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          slot!.category,
+                          style: AppTextStyles.bodyBold.copyWith(
+                            fontSize: 13,
+                            color: isPast && !isCurrent
+                                ? AppColors.textSecondary
+                                : AppColors.textPrimary,
+                          ),
+                        ),
+                        const Spacer(),
+                        _typeBadge(slot!.type),
+                      ] else ...[
+                        Text(
+                          isCurrent
+                              ? 'Now — Tap to log'
+                              : isMissed
+                                  ? 'Untracked'
+                                  : 'Available',
+                          style: AppTextStyles.caption.copyWith(
+                            fontSize: 12,
+                            color: isCurrent
+                                ? AppColors.primaryBlue
+                                : AppColors.textHint,
+                            fontWeight: isCurrent
+                                ? FontWeight.w600
+                                : FontWeight.w400,
+                          ),
+                        ),
+                        const Spacer(),
+                        Icon(
+                          isCurrent
+                              ? Icons.add_circle_outline_rounded
+                              : Icons.circle_outlined,
+                          size: 16,
+                          color: isCurrent
+                              ? AppColors.primaryBlue
+                              : AppColors.textHint,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _typeBadge(ProductivityType type) {
+    String emoji;
+    switch (type) {
+      case ProductivityType.productive:
+        emoji = '✨';
+        break;
+      case ProductivityType.neutral:
+        emoji = '⚡';
+        break;
+      case ProductivityType.wasted:
+        emoji = '💤';
+        break;
+    }
+    return Text(emoji, style: const TextStyle(fontSize: 14));
+  }
+
+  Color _typeColor(ProductivityType type) {
+    switch (type) {
+      case ProductivityType.productive:
+        return AppColors.productive;
+      case ProductivityType.neutral:
+        return AppColors.neutral;
+      case ProductivityType.wasted:
+        return AppColors.wasted;
+    }
+  }
+}

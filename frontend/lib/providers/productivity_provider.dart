@@ -20,11 +20,28 @@ class ProductivityProvider with ChangeNotifier {
   Map<String, dynamic> _productivityByCategory = {};
   String _aiInsights = '';
   double _productivityPercentage = 0;
+  int _productivityIndex = 0;
   int _totalMinutes = 0;
   int _productiveMinutes = 0;
   int _wastedMinutes = 0;
   int _neutralMinutes = 0;
+  int _totalTasks = 0;
+  int _completedTasks = 0;
 
+  // Weekly trend
+  List<Map<String, dynamic>> _weeklyTrend = [];
+  List<Map<String, dynamic>> _cumulativeFocus = [];
+  bool _weeklyTrendLoaded = false;
+
+  // AI Insights
+  Map<String, dynamic> _aiInsightsData = {};
+  bool _aiInsightsLoaded = false;
+
+  // Heatmap
+  Map<String, dynamic> _heatmapData = {};
+  bool _heatmapLoaded = false;
+
+  // Getters
   List<Task> get tasks => _tasks;
   List<TimeSlot> get slots => _slots;
   List<String> get categories => _categories;
@@ -35,10 +52,20 @@ class ProductivityProvider with ChangeNotifier {
   Map<String, dynamic> get productivityByCategory => _productivityByCategory;
   String get aiInsights => _aiInsights;
   double get productivityPercentage => _productivityPercentage;
+  int get productivityIndex => _productivityIndex;
   int get totalMinutes => _totalMinutes;
   int get productiveMinutes => _productiveMinutes;
   int get wastedMinutes => _wastedMinutes;
   int get neutralMinutes => _neutralMinutes;
+  int get totalTasks => _totalTasks;
+  int get completedTasks => _completedTasks;
+  List<Map<String, dynamic>> get weeklyTrend => _weeklyTrend;
+  List<Map<String, dynamic>> get cumulativeFocus => _cumulativeFocus;
+  bool get weeklyTrendLoaded => _weeklyTrendLoaded;
+  Map<String, dynamic> get aiInsightsData => _aiInsightsData;
+  bool get aiInsightsLoaded => _aiInsightsLoaded;
+  Map<String, dynamic> get heatmapData => _heatmapData;
+  bool get heatmapLoaded => _heatmapLoaded;
 
   Future<void> loadDailyData(DateTime date) async {
     _isLoading = true;
@@ -64,6 +91,9 @@ class ProductivityProvider with ChangeNotifier {
         _neutralMinutes = _parseIntSafe(analytics['neutralMinutes']);
         _productivityPercentage = double.tryParse(
             analytics['productivityPercentage']?.toString() ?? '0') ?? 0;
+        _productivityIndex = _parseIntSafe(analytics['productivityIndex']);
+        _totalTasks = _parseIntSafe(analytics['totalTasks']);
+        _completedTasks = _parseIntSafe(analytics['completedTasks']);
         _categoryBreakdown = Map<String, dynamic>.from(
             analytics['categoryBreakdown'] ?? {});
         _taskBreakdown = Map<String, dynamic>.from(
@@ -83,6 +113,38 @@ class ProductivityProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> loadWeeklyTrend({DateTime? date}) async {
+    try {
+      final data = await _apiService.getWeeklyTrend(date: date);
+      _weeklyTrend = List<Map<String, dynamic>>.from(data['trend'] ?? []);
+      _cumulativeFocus = List<Map<String, dynamic>>.from(data['cumulativeFocus'] ?? []);
+      _weeklyTrendLoaded = true;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Weekly trend failed: $e');
+    }
+  }
+
+  Future<void> loadAIInsights() async {
+    try {
+      _aiInsightsData = await _apiService.getAIInsights();
+      _aiInsightsLoaded = true;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('AI insights failed: $e');
+    }
+  }
+
+  Future<void> loadHeatmap({int? month, int? year}) async {
+    try {
+      _heatmapData = await _apiService.getHeatmapData(month: month, year: year);
+      _heatmapLoaded = true;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Heatmap failed: $e');
+    }
+  }
+
   int _parseIntSafe(dynamic value) {
     if (value == null) return 0;
     if (value is int) return value;
@@ -90,7 +152,9 @@ class ProductivityProvider with ChangeNotifier {
   }
 
   Future<void> addTask(String name, DateTime date) async {
-    final newTask = Task(taskName: name, date: date.toIso8601String());
+    final now = DateTime.now();
+    final cleanDate = DateTime(now.year, now.month, now.day, 12, 0, 0);
+    final newTask = Task(taskName: name, date: cleanDate.toIso8601String());
 
     try {
       final created = await _apiService.createTask(newTask);
@@ -124,15 +188,16 @@ class ProductivityProvider with ChangeNotifier {
 
   Future<void> addTimeSlot(TimeSlot slot) async {
     try {
+      debugPrint('Creating slot: ${slot.toJson()}');
       final created = await _apiService.createSlot(slot);
-      // Remove existing if same timeRange (upsert case)
+      debugPrint('Slot created: ${created.id} ${created.timeRange} ${created.type}');
       _slots.removeWhere((s) => s.timeRange == slot.timeRange);
       _slots.add(created);
       notifyListeners();
-      // Refresh analytics
-      loadDailyData(DateTime.now());
+      await loadDailyData(DateTime.now());
     } catch (e) {
       debugPrint('Failed to create time slot: $e');
+      rethrow;
     }
   }
 
@@ -204,10 +269,20 @@ class ProductivityProvider with ChangeNotifier {
     _productivityByCategory = {};
     _aiInsights = '';
     _productivityPercentage = 0;
+    _productivityIndex = 0;
     _totalMinutes = 0;
     _productiveMinutes = 0;
     _wastedMinutes = 0;
     _neutralMinutes = 0;
+    _totalTasks = 0;
+    _completedTasks = 0;
+    _weeklyTrend = [];
+    _cumulativeFocus = [];
+    _weeklyTrendLoaded = false;
+    _aiInsightsData = {};
+    _aiInsightsLoaded = false;
+    _heatmapData = {};
+    _heatmapLoaded = false;
     _error = null;
     notifyListeners();
   }

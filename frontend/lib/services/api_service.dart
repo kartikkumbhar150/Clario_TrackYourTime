@@ -22,6 +22,9 @@ class ApiService {
     };
   }
 
+  DateTime _cleanDate(DateTime date) =>
+      DateTime(date.year, date.month, date.day, 12, 0, 0);
+
   // ─── AUTH ───────────────────────────────────────────────
 
   Future<Map<String, dynamic>> registerWithEmail(String name, String email, String password) async {
@@ -81,9 +84,7 @@ class ApiService {
       Uri.parse('$baseUrl/users/profile'),
       headers: await _getHeaders(),
     );
-    if (res.statusCode == 200) {
-      return jsonDecode(res.body);
-    }
+    if (res.statusCode == 200) return jsonDecode(res.body);
     throw Exception('Failed to fetch profile');
   }
 
@@ -109,8 +110,9 @@ class ApiService {
   // ─── TASKS ──────────────────────────────────────────────
 
   Future<List<Task>> getTasks(DateTime date) async {
+    final cleanDate = _cleanDate(date);
     final res = await http.get(
-      Uri.parse('$baseUrl/tasks?date=${date.toIso8601String()}'),
+      Uri.parse('$baseUrl/tasks?date=${cleanDate.toIso8601String()}'),
       headers: await _getHeaders(),
     );
     if (res.statusCode == 200) {
@@ -141,8 +143,9 @@ class ApiService {
   // ─── TIME SLOTS ─────────────────────────────────────────
 
   Future<List<TimeSlot>> getTimeSlots(DateTime date) async {
+    final cleanDate = _cleanDate(date);
     final res = await http.get(
-      Uri.parse('$baseUrl/slots?date=${date.toIso8601String()}'),
+      Uri.parse('$baseUrl/slots?date=${cleanDate.toIso8601String()}'),
       headers: await _getHeaders(),
     );
     if (res.statusCode == 200) {
@@ -153,15 +156,18 @@ class ApiService {
   }
 
   Future<TimeSlot> createSlot(TimeSlot slot) async {
+    final headers = await _getHeaders();
+    final body = jsonEncode(slot.toJson());
     final res = await http.post(
       Uri.parse('$baseUrl/slots'),
-      headers: await _getHeaders(),
-      body: jsonEncode(slot.toJson()),
+      headers: headers,
+      body: body,
     );
     if (res.statusCode == 201 || res.statusCode == 200) {
       return TimeSlot.fromJson(jsonDecode(res.body));
     }
-    throw Exception('Failed to create time slot');
+    final errorBody = res.body;
+    throw Exception('Failed to create time slot (${res.statusCode}): $errorBody');
   }
 
   Future<TimeSlot> updateSlot(String id, {String? taskSelected, String? category, String? productivityType}) async {
@@ -175,9 +181,7 @@ class ApiService {
       headers: await _getHeaders(),
       body: jsonEncode(body),
     );
-    if (res.statusCode == 200) {
-      return TimeSlot.fromJson(jsonDecode(res.body));
-    }
+    if (res.statusCode == 200) return TimeSlot.fromJson(jsonDecode(res.body));
     throw Exception('Failed to update time slot');
   }
 
@@ -186,9 +190,7 @@ class ApiService {
       Uri.parse('$baseUrl/slots/$id'),
       headers: await _getHeaders(),
     );
-    if (res.statusCode != 200) {
-      throw Exception('Failed to delete time slot');
-    }
+    if (res.statusCode != 200) throw Exception('Failed to delete time slot');
   }
 
   // ─── CATEGORIES ─────────────────────────────────────────
@@ -211,23 +213,54 @@ class ApiService {
       headers: await _getHeaders(),
       body: jsonEncode({'categories': categories}),
     );
-    if (res.statusCode != 200) {
-      throw Exception('Failed to update categories');
-    }
+    if (res.statusCode != 200) throw Exception('Failed to update categories');
   }
 
   // ─── ANALYTICS ──────────────────────────────────────────
 
   Future<Map<String, dynamic>> getAnalytics(String period, {DateTime? date}) async {
     final queryDate = date ?? DateTime.now();
+    final cleanDate = _cleanDate(queryDate);
     final res = await http.get(
-      Uri.parse('$baseUrl/analytics/$period?date=${queryDate.toIso8601String()}'),
+      Uri.parse('$baseUrl/analytics/$period?date=${cleanDate.toIso8601String()}'),
       headers: await _getHeaders(),
     );
-    if (res.statusCode == 200) {
-      return jsonDecode(res.body);
-    }
+    if (res.statusCode == 200) return jsonDecode(res.body);
     throw Exception('Failed to fetch analytics');
+  }
+
+  Future<Map<String, dynamic>> getWeeklyTrend({DateTime? date}) async {
+    final queryDate = date ?? DateTime.now();
+    final cleanDate = _cleanDate(queryDate);
+    final res = await http.get(
+      Uri.parse('$baseUrl/analytics/weekly-trend?date=${cleanDate.toIso8601String()}'),
+      headers: await _getHeaders(),
+    );
+    if (res.statusCode == 200) return jsonDecode(res.body);
+    throw Exception('Failed to fetch weekly trend');
+  }
+
+  Future<Map<String, dynamic>> getHeatmapData({int? month, int? year}) async {
+    final now = DateTime.now();
+    final m = month ?? now.month;
+    final y = year ?? now.year;
+    final res = await http.get(
+      Uri.parse('$baseUrl/analytics/heatmap?month=$m&year=$y'),
+      headers: await _getHeaders(),
+    );
+    if (res.statusCode == 200) return jsonDecode(res.body);
+    throw Exception('Failed to fetch heatmap');
+  }
+
+  // ─── AI INSIGHTS ────────────────────────────────────────
+
+  Future<Map<String, dynamic>> getAIInsights() async {
+    final res = await http.get(
+      Uri.parse('$baseUrl/ai/insights'),
+      headers: await _getHeaders(),
+    );
+    if (res.statusCode == 200) return jsonDecode(res.body);
+    throw Exception('Failed to fetch AI insights');
   }
 
   // ─── REPORTS ───────────────────────────────────────────
@@ -239,9 +272,7 @@ class ApiService {
       ),
       headers: await _getHeaders(),
     );
-    if (res.statusCode == 200) {
-      return jsonDecode(res.body);
-    }
+    if (res.statusCode == 200) return jsonDecode(res.body);
     throw Exception('Failed to fetch report');
   }
 }

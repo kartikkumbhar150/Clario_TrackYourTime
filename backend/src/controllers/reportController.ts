@@ -26,13 +26,11 @@ export const getReport = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'startDate must be before endDate' });
     }
 
-    // Fetch all time slots in range
     const slots = await TimeSlot.find({
       userId: user._id,
       date: { $gte: start, $lte: end },
     });
 
-    // Fetch all tasks in range
     const tasks = await Task.find({
       userId: user._id,
       date: { $gte: start, $lte: end },
@@ -50,12 +48,15 @@ export const getReport = async (req: Request, res: Response) => {
         wastedMinutes: 0,
         neutralMinutes: 0,
         productivityPercentage: 0,
+        productivityIndex: 0,
         categoryBreakdown: {},
         taskBreakdown: {},
         productivityByCategory: {},
         totalTasks: tasks.length,
         completedTasks: tasks.filter(t => t.isCompleted).length,
         dailyBreakdown: [],
+        hourlyProductivity: [],
+        weekdayBreakdown: {},
       });
     }
 
@@ -70,34 +71,37 @@ export const getReport = async (req: Request, res: Response) => {
 
     // Daily breakdown map
     let dailyMap: {
-      [key: string]: {
-        productive: number;
-        wasted: number;
-        neutral: number;
-        total: number;
-      };
+      [key: string]: { productive: number; wasted: number; neutral: number; total: number };
     } = {};
 
+    // Hourly productivity (0-23)
+    let hourlyMap: { [hour: number]: { productive: number; neutral: number; wasted: number; total: number } } = {};
+    for (let h = 0; h < 24; h++) {
+      hourlyMap[h] = { productive: 0, neutral: 0, wasted: 0, total: 0 };
+    }
+
+    // Weekday breakdown (0=Sun, 6=Sat)
+    let weekdayMap: { [day: number]: { productive: number; neutral: number; wasted: number; total: number; count: number } } = {};
+    for (let d = 0; d < 7; d++) {
+      weekdayMap[d] = { productive: 0, neutral: 0, wasted: 0, total: 0, count: 0 };
+    }
+
+    // Track days per weekday for averaging
+    const weekdayDays: { [day: number]: Set<string> } = {};
+    for (let d = 0; d < 7; d++) weekdayDays[d] = new Set();
+
     slots.forEach((slot) => {
-      // Each slot is 20 minutes
       if (slot.productivityType === ProductivityType.PRODUCTIVE) productiveCount++;
       else if (slot.productivityType === ProductivityType.WASTED) wastedCount++;
       else neutralCount++;
 
-      // Category breakdown (minutes)
       categoryMap[slot.category] = (categoryMap[slot.category] || 0) + 20;
 
-      // Task breakdown (minutes)
       const taskName = (slot.taskSelected as string) || slot.category;
       taskMap[taskName] = (taskMap[taskName] || 0) + 20;
 
-      // Productivity per category
       if (!categoryProductivity[slot.category]) {
-        categoryProductivity[slot.category] = {
-          productive: 0,
-          neutral: 0,
-          wasted: 0,
-        };
+        categoryProductivity[slot.category] = { productive: 0, neutral: 0, wasted: 0 };
       }
       if (slot.productivityType === ProductivityType.PRODUCTIVE) {
         categoryProductivity[slot.category].productive += 20;
@@ -113,13 +117,28 @@ export const getReport = async (req: Request, res: Response) => {
         dailyMap[dateKey] = { productive: 0, wasted: 0, neutral: 0, total: 0 };
       }
       dailyMap[dateKey].total += 20;
-      if (slot.productivityType === ProductivityType.PRODUCTIVE) {
-        dailyMap[dateKey].productive += 20;
-      } else if (slot.productivityType === ProductivityType.WASTED) {
-        dailyMap[dateKey].wasted += 20;
-      } else {
-        dailyMap[dateKey].neutral += 20;
+      if (slot.productivityType === ProductivityType.PRODUCTIVE) dailyMap[dateKey].productive += 20;
+      else if (slot.productivityType === ProductivityType.WASTED) dailyMap[dateKey].wasted += 20;
+      else dailyMap[dateKey].neutral += 20;
+
+      // Hourly productivity
+      const hourMatch = slot.timeRange.match(/^(\d{2}):/);
+      if (hourMatch) {
+        const hour = parseInt(hourMatch[1]);
+        hourlyMap[hour].total += 20;
+        if (slot.productivityType === ProductivityType.PRODUCTIVE) hourlyMap[hour].productive += 20;
+        else if (slot.productivityType === ProductivityType.WASTED) hourlyMap[hour].wasted += 20;
+        else hourlyMap[hour].neutral += 20;
       }
+
+      // Weekday breakdown
+      const slotDate = new Date(slot.date);
+      const weekday = slotDate.getDay();
+      weekdayMap[weekday].total += 20;
+      weekdayDays[weekday].add(dateKey);
+      if (slot.productivityType === ProductivityType.PRODUCTIVE) weekdayMap[weekday].productive += 20;
+      else if (slot.productivityType === ProductivityType.WASTED) weekdayMap[weekday].wasted += 20;
+      else weekdayMap[weekday].neutral += 20;
     });
 
     const productiveMinutes = productiveCount * 20;
@@ -128,18 +147,58 @@ export const getReport = async (req: Request, res: Response) => {
     const totalMinutes = totalTrackedSlots * 20;
     const productivityPercentage = (productiveMinutes / totalMinutes) * 100;
 
-    // Convert dailyMap to sorted array
+    // Tasks per day for daily breakdown
+    const taskDayMap: { [key: string]: { completed: number; total: number } } = {};
+    tasks.forEach(task => {
+      const key = new Date(task.date).toISOString().split('T')[0];
+      if (!taskDayMap[key]) taskDayMap[key] = { completed: 0, total: 0 };
+      taskDayMap[key].total++;
+      if (task.isCompleted) taskDayMap[key].completed++;
+    });
+
     const dailyBreakdown = Object.entries(dailyMap)
-      .map(([date, data]) => ({
-        date,
-        ...data,
-        productivityPercentage: data.total > 0
-          ? parseFloat(((data.productive / data.total) * 100).toFixed(2))
-          : 0,
-      }))
+      .map(([date, data]) => {
+        const taskData = taskDayMap[date] || { completed: 0, total: 0 };
+        return {
+          date,
+          ...data,
+          productivityPercentage: data.total > 0
+            ? parseFloat(((data.productive / data.total) * 100).toFixed(2))
+            : 0,
+          tasksCompleted: taskData.completed,
+          tasksMissed: taskData.total - taskData.completed,
+        };
+      })
       .sort((a, b) => a.date.localeCompare(b.date));
 
+    // Convert hourly map to array
+    const hourlyProductivity = Object.entries(hourlyMap)
+      .map(([hour, data]) => ({ hour: parseInt(hour), ...data }))
+      .sort((a, b) => a.hour - b.hour);
+
+    // Convert weekday map to averaged values
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const weekdayBreakdown = Object.entries(weekdayMap).map(([day, data]) => {
+      const dayCount = weekdayDays[parseInt(day)].size || 1;
+      return {
+        day: dayNames[parseInt(day)],
+        dayIndex: parseInt(day),
+        avgProductive: Math.round(data.productive / dayCount),
+        avgWasted: Math.round(data.wasted / dayCount),
+        avgNeutral: Math.round(data.neutral / dayCount),
+        avgTotal: Math.round(data.total / dayCount),
+      };
+    });
+
     const totalDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const completedTasks = tasks.filter(t => t.isCompleted).length;
+    const daysTracked = Object.keys(dailyMap).length;
+
+    // Productivity Index
+    const taskRate = tasks.length > 0 ? (completedTasks / tasks.length) : 0;
+    const timeUtil = totalMinutes > 0 ? (productiveMinutes / totalMinutes) : 0;
+    const consistency = totalDays > 0 ? Math.min(daysTracked / totalDays, 1) : 0;
+    const productivityIndex = Math.round((taskRate * 40) + (timeUtil * 30) + (consistency * 30));
 
     res.json({
       startDate: start.toISOString(),
@@ -150,12 +209,15 @@ export const getReport = async (req: Request, res: Response) => {
       wastedMinutes,
       neutralMinutes,
       productivityPercentage: parseFloat(productivityPercentage.toFixed(2)),
+      productivityIndex,
       categoryBreakdown: categoryMap,
       taskBreakdown: taskMap,
       productivityByCategory: categoryProductivity,
       totalTasks: tasks.length,
-      completedTasks: tasks.filter(t => t.isCompleted).length,
+      completedTasks,
       dailyBreakdown,
+      hourlyProductivity,
+      weekdayBreakdown,
     });
   } catch (error: any) {
     res.status(400).json({ message: error.message });

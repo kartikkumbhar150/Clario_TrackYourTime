@@ -4,7 +4,7 @@ class TimeSlot {
   final String? id;
   final String date;
   final String timeRange; // e.g., '09:00-09:20'
-  final String taskSelected;
+  final String? taskSelected;
   final String category;
   final ProductivityType type;
 
@@ -12,20 +12,21 @@ class TimeSlot {
     this.id,
     required this.date,
     required this.timeRange,
-    required this.taskSelected,
+    this.taskSelected,
     required this.category,
     required this.type,
   });
 
   factory TimeSlot.fromJson(Map<String, dynamic> json) {
     return TimeSlot(
-      id: json['_id'],
-      date: json['date'],
-      timeRange: json['timeRange'],
-      taskSelected: json['taskSelected'],
-      category: json['category'],
+      id: json['_id']?.toString(),
+      date: json['date']?.toString() ?? '',
+      timeRange: json['timeRange']?.toString() ?? '',
+      taskSelected: json['taskSelected']?.toString(),
+      category: json['category']?.toString() ?? 'Other',
       type: ProductivityType.values.firstWhere(
-          (e) => e.toString().split('.').last.toLowerCase() == json['productivityType'].toString().toLowerCase(),
+          (e) => e.toString().split('.').last.toLowerCase() ==
+              (json['productivityType']?.toString() ?? 'neutral').toLowerCase(),
           orElse: () => ProductivityType.neutral),
     );
   }
@@ -36,9 +37,10 @@ class TimeSlot {
     return {
       'date': date,
       'timeRange': timeRange,
-      'taskSelected': taskSelected,
+      'taskSelected': taskSelected ?? category,
       'category': category,
       'productivityType': capitalizedType,
     };
   }
 }
+
